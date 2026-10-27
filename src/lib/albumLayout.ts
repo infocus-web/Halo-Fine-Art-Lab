@@ -64,7 +64,18 @@ export interface AlbumDesign {
   giftBox: boolean;
   cover: AlbumCover;
   spreads: AlbumSpread[];
+  /** Separación entre fotos y margen exterior (como los controles de SmartAlbums). */
+  spacing?: SpacingOptions;
 }
+
+export interface SpacingOptions {
+  /** Separación blanca entre fotos, en mm. */
+  gutterMm: number;
+  /** Margen blanco alrededor de cada página, en mm (0 = fotos a sangre). */
+  marginMm: number;
+}
+
+export const DEFAULT_SPACING: SpacingOptions = { gutterMm: GUTTER_MM, marginMm: 0 };
 
 export interface LayoutPhoto {
   id: string;
@@ -174,8 +185,8 @@ function scoreRects(rects: Rect[], photos: LayoutPhoto[], pageW: number, pageH: 
     score += crop * crop * (0.4 + areaFrac);
     // Celdas demasiado finas o diminutas se ven mal impresas.
     const ar = r.w / r.h;
-    if (ar > 3.2 || ar < 1 / 3.2) score += 4;
-    if (Math.min(r.w, r.h) < minSide * 0.13) score += 6;
+    if (ar > 3.2 || ar < 1 / 3.2) score += 1.5;
+    if (Math.min(r.w, r.h) < minSide * 0.13) score += 2;
     minArea = Math.min(minArea, r.w * r.h);
     maxArea = Math.max(maxArea, r.w * r.h);
   }
@@ -191,13 +202,13 @@ function signatureOf(rects: Rect[], pageW: number, pageH: number): string {
 const pageCache = new Map<string, Candidate[]>();
 
 /** Mejores mosaicos para una página con estas fotos (en orden). */
-function bestPageLayouts(photos: LayoutPhoto[], pageW: number, pageH: number, gap: number, limit = 8): Candidate[] {
-  const key = `${pageW}x${pageH}:${photos.map((p) => p.aspect.toFixed(2)).join(',')}`;
+function bestPageLayouts(photos: LayoutPhoto[], pageW: number, pageH: number, gap: number, limit = 8, margin = 0): Candidate[] {
+  const key = `${pageW}x${pageH}:${gap}:${margin}:${photos.map((p) => p.aspect.toFixed(2)).join(',')}`;
   const hit = pageCache.get(key);
   if (hit) return hit;
 
   const n = photos.length;
-  const page: Rect = { x: 0, y: 0, w: pageW, h: pageH };
+  const page: Rect = { x: margin, y: margin, w: pageW - margin * 2, h: pageH - margin * 2 };
   const all: Candidate[] = [];
   const cuts = n - 1;
   const shapeList = shapes(0, n);
@@ -241,21 +252,30 @@ interface SpreadOption {
 }
 
 /** Alternativas de diseño para una doble página, ordenadas de mejor a peor. */
-function spreadOptions(photos: LayoutPhoto[], sizeId: string, limit = 12): SpreadOption[] {
+function spreadOptions(photos: LayoutPhoto[], sizeId: string, spacing: SpacingOptions = DEFAULT_SPACING, limit = 14): SpreadOption[] {
   const { w: pw, h: ph } = pageSizeMm(sizeId);
+  const gap = Math.max(0, spacing.gutterMm);
+  const margin = Math.max(0, Math.min(spacing.marginMm, Math.min(pw, ph) / 4));
   const n = photos.length;
   if (n === 0) return [];
-  if (n === 1) {
-    // Una sola foto: ocupa toda la doble página (las hojas son layflat).
-    return [{ rects: [{ x: 0, y: 0, w: pw * 2, h: ph }], score: 0 }];
-  }
 
   const options: SpreadOption[] = [];
-  for (let k = 1; k < n; k++) {
+  if (n === 1) {
+    // Una sola foto: toda la doble página (layflat), o sola en una página.
+    const a = photos[0].aspect;
+    const crop = (w: number, h: number) => Math.abs(Math.log(w / h / a));
+    const fw = pw * 2 - margin * 2;
+    const fh = ph - margin * 2;
+    options.push({ rects: [{ x: margin, y: margin, w: fw, h: fh }], score: crop(fw, fh) * 0.6 });
+  }
+  // Todas las fotos en una sola página (la otra queda en blanco), o repartidas.
+  for (let k = 0; k <= n; k++) {
     if (k > MAX_PHOTOS_PER_PAGE || n - k > MAX_PHOTOS_PER_PAGE) continue;
-    const left = bestPageLayouts(photos.slice(0, k), pw, ph, GUTTER_MM, 4);
-    const right = bestPageLayouts(photos.slice(k), pw, ph, GUTTER_MM, 4);
-    const balance = Math.abs(k - (n - k)) / n;
+    const left = k > 0 ? bestPageLayouts(photos.slice(0, k), pw, ph, gap, 4, margin) : [{ rects: [], score: 0, signature: '' }];
+    const right = k < n ? bestPageLayouts(photos.slice(k), pw, ph, gap, 4, margin) : [{ rects: [], score: 0, signature: '' }];
+    const oneSided = k === 0 || k === n;
+    // Dejar una página en blanco es una alternativa, nunca la primera opción.
+    const balance = oneSided ? (n > 1 ? 8 : 0.9) : Math.abs(k - (n - k)) / n;
     for (const l of left) {
       for (const r of right) {
         options.push({
@@ -270,13 +290,13 @@ function spreadOptions(photos: LayoutPhoto[], sizeId: string, limit = 12): Sprea
 }
 
 /** Cantidad de diseños distintos disponibles para estas fotos. */
-export function countSpreadVariants(photos: LayoutPhoto[], sizeId: string): number {
-  return spreadOptions(photos, sizeId).length;
+export function countSpreadVariants(photos: LayoutPhoto[], sizeId: string, spacing?: SpacingOptions): number {
+  return spreadOptions(photos, sizeId, spacing).length;
 }
 
 /** Calcula las celdas de una doble página para la alternativa `variant`. */
-export function layoutSpread(photos: LayoutPhoto[], sizeId: string, variant = 0, previous?: AlbumCell[]): AlbumCell[] {
-  const opts = spreadOptions(photos, sizeId);
+export function layoutSpread(photos: LayoutPhoto[], sizeId: string, variant = 0, previous?: AlbumCell[], spacing?: SpacingOptions): AlbumCell[] {
+  const opts = spreadOptions(photos, sizeId, spacing);
   if (opts.length === 0) return [];
   const opt = opts[((variant % opts.length) + opts.length) % opts.length];
   const { w: pw, h: ph } = pageSizeMm(sizeId);
@@ -363,7 +383,7 @@ export function distributeCounts(photoCount: number, sheets: number): number[] {
   return counts;
 }
 
-export function buildSpreads(photos: LayoutPhoto[], sizeId: string, sheets: number): AlbumSpread[] {
+export function buildSpreads(photos: LayoutPhoto[], sizeId: string, sheets: number, spacing?: SpacingOptions): AlbumSpread[] {
   const counts = distributeCounts(photos.length, sheets);
   const spreads: AlbumSpread[] = [];
   let cursor = 0;
@@ -374,7 +394,7 @@ export function buildSpreads(photos: LayoutPhoto[], sizeId: string, sheets: numb
       id: newSpreadId(),
       photoIds: slice.map((p) => p.id),
       variant: 0,
-      cells: layoutSpread(slice, sizeId, 0),
+      cells: layoutSpread(slice, sizeId, 0, undefined, spacing),
     });
   }
   return spreads;
