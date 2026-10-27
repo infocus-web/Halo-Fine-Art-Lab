@@ -1,3 +1,5 @@
+import type { AlbumDesign } from './lib/albumLayout';
+
 export type BookFormatId = 
   | 'square-30' 
   | 'square-20' 
@@ -289,6 +291,8 @@ export interface PhotobookProject {
   photos: PhotoAsset[];
   spreads: PhotobookSpread[];
   giftBoxIncluded: boolean;
+  /** Diseño del editor simple (SimpleAlbumEditor). Si existe, manda sobre spreads/cover/foil. */
+  album?: AlbumDesign;
   createdAt: string;
   updatedAt: string;
 }
