@@ -18,8 +18,8 @@ import { loadActiveDraftProject, hydratePhotosFromStorage } from './lib/projectS
 // keeps the heaviest code — PhotobookBuilder (~7k lines), and the jsPDF /
 // JSZip powered admin & invoice tooling — out of the bundle everyone
 // downloads just to see the landing page.
-const SimpleAlbumEditor = lazy(() =>
-  import('./components/SimpleAlbumEditor').then((m) => ({ default: m.SimpleAlbumEditor }))
+const FotolibroExpress = lazy(() =>
+  import('./components/FotolibroExpress').then((m) => ({ default: m.FotolibroExpress }))
 );
 const ConciergeDesignModal = lazy(() =>
   import('./components/ConciergeDesignModal').then((m) => ({ default: m.ConciergeDesignModal }))
@@ -488,7 +488,7 @@ function MainAppContent() {
         {/* Interactive Photobook Builder Modal */}
         {isBuilderOpen && (
           <Suspense key="photobook-builder-modal" fallback={<ModalLoadingFallback />}>
-            <SimpleAlbumEditor
+            <FotolibroExpress
               initialProject={builderInitialProject}
               onClose={() => {
                 setIsBuilderOpen(false);

@@ -74,3 +74,25 @@ export function getFotolibroSize(id?: string): FotolibroSize | undefined {
 export function minSheetsFor(cover: FotolibroCoverType): number {
   return cover === 'dura' ? MIN_SHEETS_DURA : MIN_SHEETS_BLANDA;
 }
+
+// ---------------------------------------------------------------------------
+// Fotolibros "listos para elegir" (pantalla 1 de FotolibroExpress).
+// Para cambiar qué se ofrece, editar SOLO esta lista: medida (sizeId de
+// FOTOLIBRO_SIZES) + tipo de tapa. El precio sale solo de la lista oficial.
+// ---------------------------------------------------------------------------
+
+export interface FotolibroPreset {
+  id: string;
+  name: string;
+  tagline: string;
+  sizeId: string;
+  coverType: FotolibroCoverType;
+  finish: FotolibroFinish;
+  badge?: string;
+}
+
+export const FOTOLIBRO_PRESETS: FotolibroPreset[] = [
+  { id: 'esencial', name: 'Esencial', tagline: 'Tapa blanda con tu foto. Liviano y perfecto para regalar.', sizeId: '20x20', coverType: 'blanda', finish: 'envolvente' },
+  { id: 'clasico', name: 'Clásico', tagline: 'Tapa dura con foto y contratapa de cuero negro. Incluye caja.', sizeId: '30x30', coverType: 'dura', finish: 'foto-tapa-cuero', badge: 'El más elegido' },
+  { id: 'gran-formato', name: 'Gran formato', tagline: 'Nuestro libro más grande, para tus fotos más importantes. Incluye caja.', sizeId: '40x40', coverType: 'dura', finish: 'foto-tapa-cuero' },
+];
