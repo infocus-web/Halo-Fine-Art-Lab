@@ -276,8 +276,8 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
               <span className="font-serif-luxury italic text-xl sm:text-2xl text-[#8C6D37] block">
                 &ldquo;Cuanto más grande el libro, más presente la historia.&rdquo;
               </span>
-              <p className="text-xs sm:text-sm text-[#736B60] tracking-wider uppercase mt-1 font-mono">
-                Colección Grandes Formatos · Presupuesto Oficial
+              <p className="text-sm sm:text-base text-[#736B60] mt-1">
+                Fotolibros grandes · Precios oficiales
               </p>
             </div>
 
@@ -299,34 +299,34 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                     />
                     
                     {/* Badge: Incluye Caja Contenedora */}
-                    <div className="absolute top-3 left-3 bg-[#1F1C18]/90 backdrop-blur-md text-[#FDFCF9] border border-[#ECC880]/50 px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-lg">
+                    <div className="absolute top-3 left-3 bg-[#1F1C18]/90 backdrop-blur-md text-[#FDFCF9] border border-[#ECC880]/50 px-3.5 py-1.5 rounded-full text-sm font-semibold flex items-center gap-1.5 shadow-lg">
                       <Package className="w-3.5 h-3.5 text-[#ECC880]" />
-                      <span>Incluye Caja Contenedora sin cargo</span>
+                      <span>Incluye caja de regalo</span>
                     </div>
 
                     {/* Badge: Formato */}
-                    <div className="absolute bottom-3 right-3 bg-white/95 backdrop-blur-md text-[#1F1C18] border border-[#D6CEBE] px-3 py-1 rounded-xl text-xs font-mono font-bold shadow-sm">
+                    <div className="absolute bottom-3 right-3 bg-white/95 backdrop-blur-md text-[#1F1C18] border border-[#D6CEBE] px-3 py-1 rounded-xl text-sm font-bold shadow-sm">
                       {activeFormat.label} ({activeFormat.openLabel})
                     </div>
                   </div>
 
                   {/* Product Details Pills */}
-                  <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="grid grid-cols-2 gap-3 text-sm">
                     <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[#E8E2D5] space-y-1">
-                      <span className="text-[#8C6D37] font-bold block text-[11px] uppercase tracking-wider">Apertura 180°</span>
-                      <p className="text-[#595248] text-[11px]">Hojas rígidas Layflat de 650 g/m² sin corte central.</p>
+                      <span className="text-[#8C6D37] font-bold block text-sm">Abre plano</span>
+                      <p className="text-[#595248] text-sm">Hojas rígidas, sin corte en el medio.</p>
                     </div>
                     <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[#E8E2D5] space-y-1">
-                      <span className="text-[#8C6D37] font-bold block text-[11px] uppercase tracking-wider">Caja Personalizada</span>
-                      <p className="text-[#595248] text-[11px]">Estuche rígido de conservación a medida de regalo.</p>
+                      <span className="text-[#8C6D37] font-bold block text-sm">Caja de regalo</span>
+                      <p className="text-[#595248] text-sm">Caja rígida a medida para guardarlo.</p>
                     </div>
                     <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[#E8E2D5] space-y-1">
-                      <span className="text-[#8C6D37] font-bold block text-[11px] uppercase tracking-wider">Capacidad Base</span>
-                      <p className="text-[#595248] text-[11px]">10 hojas base (20 pliegos). {activeFormat.idealPhotos}.</p>
+                      <span className="text-[#8C6D37] font-bold block text-sm">20 páginas</span>
+                      <p className="text-[#595248] text-sm">Ideal para {activeFormat.idealPhotos}.</p>
                     </div>
                     <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[#E8E2D5] space-y-1">
-                      <span className="text-[#8C6D37] font-bold block text-[11px] uppercase tracking-wider">Producción</span>
-                      <p className="text-[#595248] text-[11px]">15 a 20 días hábiles de encuadernación artesanal.</p>
+                      <span className="text-[#8C6D37] font-bold block text-sm">Tiempo</span>
+                      <p className="text-[#595248] text-sm">Listo en 15 a 20 días hábiles.</p>
                     </div>
                   </div>
                 </div>
@@ -336,23 +336,23 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                   
                   {/* Title & Collection */}
                   <div>
-                    <div className="flex items-center gap-2 text-xs font-semibold tracking-widest text-[#8C6D37] uppercase mb-1">
+                    <div className="flex items-center gap-2 text-sm font-semibold tracking-widest text-[#8C6D37] uppercase mb-1">
                       <Sparkles className="w-3.5 h-3.5 text-[#8C6D37]" />
                       <span>{PHOTOBOOK_GRANDES_FORMATOS.collection}</span>
                     </div>
                     <h3 className="font-serif-luxury text-2xl sm:text-3xl text-[#1F1C18] font-normal">
                       {PHOTOBOOK_GRANDES_FORMATOS.name}
                     </h3>
-                    <p className="text-xs sm:text-sm text-[#595248] font-light mt-2 leading-relaxed">
+                    <p className="text-sm sm:text-base text-[#595248] mt-2 leading-relaxed">
                       {PHOTOBOOK_GRANDES_FORMATOS.description}
                     </p>
                   </div>
 
                   {/* 1. Formato Selector */}
                   <div className="space-y-2.5">
-                    <label className="block text-xs font-bold uppercase tracking-wider text-[#1F1C18] flex items-center justify-between">
-                      <span>1. Seleccionar Formato Cerrado (y Abierto)</span>
-                      <span className="text-[11px] font-mono text-[#8C6D37] font-normal">Base 10 hojas (20 págs)</span>
+                    <label className="block text-sm font-bold text-[#1F1C18] flex items-center justify-between">
+                      <span>1. Elegí el tamaño</span>
+                      <span className="text-sm text-[#8C6D37] font-normal">Incluye 20 páginas</span>
                     </label>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -370,23 +370,23 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                             }`}
                           >
                             {fmt.popular && (
-                              <span className="absolute -top-2.5 right-3 bg-[#8C6D37] text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                Más Solicitado
+                              <span className="absolute -top-2.5 right-3 bg-[#8C6D37] text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                                Más pedido
                               </span>
                             )}
-                            <div className="font-serif-luxury text-lg font-bold text-[#1F1C18]">
+                            <div className="text-xl font-semibold text-[#1F1C18]">
                               {fmt.label}
                             </div>
-                            <div className="text-xs font-mono text-[#736B60] mt-0.5">
+                            <div className="text-sm text-[#736B60] mt-0.5">
                               {fmt.openLabel}
                             </div>
-                            <div className="text-[11px] text-[#8C8275] mt-2 flex justify-between items-center border-t border-[#E8E2D5]/60 pt-1.5">
-                              <span>Desde:</span>
-                              <strong className="text-sm font-serif-luxury text-[#1F1C18]">
+                            <div className="text-sm text-[#8C8275] mt-2 flex justify-between items-center border-t border-[#E8E2D5]/60 pt-1.5">
+                              <span>Desde</span>
+                              <strong className="text-lg font-semibold text-[#1F1C18]">
                                 {formatPriceARS(fmt.basePriceEnvolvente)} ARS
                               </strong>
                             </div>
-                            <div className="text-[10px] text-[#8C6D37] mt-0.5">
+                            <div className="text-sm text-[#8C6D37] mt-0.5">
                               + {formatPriceARS(fmt.extraSheetPrice)} por hoja extra
                             </div>
                           </button>
@@ -397,10 +397,10 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
 
                   {/* 2. Terminación Selector (Same Price) */}
                   <div className="space-y-2.5">
-                    <label className="block text-xs font-bold uppercase tracking-wider text-[#1F1C18] flex items-center justify-between">
-                      <span>2. Terminación de Tapa</span>
-                      <span className="text-[11px] text-emerald-800 font-semibold bg-emerald-100 px-2 py-0.5 rounded-full">
-                        Ambas al mismo valor
+                    <label className="block text-sm font-bold text-[#1F1C18] flex items-center justify-between">
+                      <span>2. Elegí la tapa</span>
+                      <span className="text-sm text-emerald-800 font-semibold bg-emerald-100 px-2 py-0.5 rounded-full">
+                        Mismo precio
                       </span>
                     </label>
 
@@ -419,12 +419,12 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <span className="font-serif-luxury text-base font-bold text-[#1F1C18]">
+                              <span className="text-lg font-semibold text-[#1F1C18]">
                                 {finish.name}
                               </span>
                               <CheckCircle2 className={`w-4 h-4 ${isSelected ? 'text-[#8C6D37]' : 'text-gray-300'}`} />
                             </div>
-                            <p className="text-xs text-[#595248] mt-2 leading-relaxed">
+                            <p className="text-sm text-[#595248] mt-2 leading-relaxed">
                               {finish.description}
                             </p>
                           </button>
@@ -437,11 +437,11 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                   <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[#E8E2D5] space-y-3">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div>
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#1F1C18] block">
-                          3. Hojas Adicionales
+                        <span className="text-sm font-bold text-[#1F1C18] block">
+                          3. ¿Querés más páginas?
                         </span>
-                        <p className="text-xs text-[#736B60]">
-                          Base incluida: <strong>10 hojas</strong> (20 páginas). Cada hoja agrega 2 carillas de apertura plana.
+                        <p className="text-sm text-[#736B60]">
+                          Incluye 10 hojas (20 páginas). Cada hoja extra suma 2 páginas.
                         </p>
                       </div>
 
@@ -455,7 +455,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                         >
                           <Minus className="w-3.5 h-3.5" />
                         </button>
-                        <span className="font-mono text-sm font-bold text-[#1F1C18] px-2 min-w-16 text-center">
+                        <span className="text-base font-bold text-[#1F1C18] px-2 min-w-16 text-center">
                           +{extraSheets} {extraSheets === 1 ? 'hoja' : 'hojas'}
                         </span>
                         <button
@@ -469,9 +469,9 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                     </div>
 
                     {/* Breakdown calculation */}
-                    <div className="flex flex-wrap items-center justify-between text-xs text-[#595248] pt-2 border-t border-[#E8E2D5]/80 font-mono">
+                    <div className="flex flex-wrap items-center justify-between text-sm text-[#595248] pt-2 border-t border-[#E8E2D5]/80">
                       <span>
-                        Total: <strong>{activeFormat.baseSheets + extraSheets} hojas</strong> ({totalPages} páginas / pliegos)
+                        Total: <strong>{activeFormat.baseSheets + extraSheets} hojas</strong> ({totalPages} páginas)
                       </span>
                       {extraSheets > 0 && (
                         <span className="text-[#8C6D37] font-semibold">
@@ -485,24 +485,24 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                   <div className="pt-4 border-t border-[#E8E2D5] space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div>
-                        <span className="text-xs text-[#736B60] uppercase tracking-wider block">
-                          Precio Total Presupuesto Oficial (IVA incluido)
+                        <span className="text-sm text-[#736B60] block">
+                          Total con IVA
                         </span>
-                        <div className="font-serif-luxury text-3xl sm:text-4xl font-bold text-[#1F1C18]">
-                          {formatPriceARS(photobookTotalPrice)} ARS
+                        <div className="text-3xl sm:text-4xl font-semibold text-[#1F1C18]">
+                          {formatPriceARS(photobookTotalPrice)}
                         </div>
-                        <span className="text-[11px] text-[#8C6D37] font-medium block">
-                          Seña 50%: {formatPriceARS(Math.round(photobookTotalPrice * 0.5))} ARS · Saldo contra entrega
+                        <span className="text-sm text-[#8C6D37] font-medium block">
+                          Seña del 50%: {formatPriceARS(Math.round(photobookTotalPrice * 0.5))}. El resto, al entregar.
                         </span>
                       </div>
 
                       <button
                         type="button"
                         onClick={handleAddPhotobookToCart}
-                        className="px-8 py-4 rounded-full bg-[#1F1C18] hover:bg-[#3D352E] text-[#FDFCF9] text-xs uppercase tracking-widest font-bold transition-all shadow-xl flex items-center justify-center gap-2 cursor-pointer"
+                        className="px-7 py-3.5 rounded-full bg-[#1F1C18] hover:bg-[#3D352E] text-[#FDFCF9] text-base font-bold transition-all shadow-xl flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <ShoppingBag className="w-4 h-4 text-[#ECC880]" />
-                        <span>Agregar al Carrito</span>
+                        <span>Agregar al carrito</span>
                       </button>
                     </div>
 
@@ -511,19 +511,19 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                       <button
                         type="button"
                         onClick={() => onSelectFormatToBuild(activeFormat.id)}
-                        className="py-3 px-4 rounded-xl border border-[#D6CEBE] bg-[#FAF8F5] hover:bg-[#EFE9DE] text-xs font-semibold text-[#1F1C18] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        className="py-3 px-4 rounded-xl border border-[#D6CEBE] bg-[#FAF8F5] hover:bg-[#EFE9DE] text-sm font-semibold text-[#1F1C18] transition-all flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <BookOpen className="w-4 h-4 text-[#8C6D37]" />
-                        <span>Diseñar en Editor Layflat</span>
+                        <span>Subir mis fotos y armarlo</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => onOpenConcierge(activeFormat.id)}
-                        className="py-3 px-4 rounded-xl border border-[#8C6D37]/50 bg-white hover:bg-[#FAF8F5] text-xs font-semibold text-[#8C6D37] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        className="py-3 px-4 rounded-xl border border-[#8C6D37]/50 bg-white hover:bg-[#FAF8F5] text-sm font-semibold text-[#8C6D37] transition-all flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <Sparkles className="w-4 h-4 text-[#8C6D37]" />
-                        <span>Pedir Maquetado Concierge</span>
+                        <span>Que lo armen ustedes</span>
                       </button>
                     </div>
                   </div>
@@ -538,26 +538,26 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
                 <div>
                   <h4 className="font-serif-luxury text-xl font-bold text-[#1F1C18]">
-                    Tabla de Valores — Colección Grandes Formatos
+                    Lista de precios
                   </h4>
-                  <p className="text-xs text-[#736B60]">
-                    Precios finales en pesos argentinos con IVA incluido. Todos los formatos incluyen caja contenedora a juego.
+                  <p className="text-sm text-[#736B60]">
+                    Precios finales en pesos, con IVA. Todos incluyen caja de regalo.
                   </p>
                 </div>
-                <span className="text-[11px] font-mono text-[#8C6D37] bg-[#FAF8F5] border border-[#E8E2D5] px-3 py-1 rounded-full self-start sm:self-auto font-medium">
+                <span className="text-sm text-[#8C6D37] bg-[#FAF8F5] border border-[#E8E2D5] px-3 py-1 rounded-full self-start sm:self-auto font-medium">
                   Actualizado Agosto 2026
                 </span>
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full text-left text-sm border-collapse">
                   <thead>
-                    <tr className="bg-[#262422] text-[#FDFCF9] font-serif-luxury text-xs uppercase tracking-wider">
-                      <th className="py-3.5 px-4 rounded-l-xl">Formato Cerrado</th>
-                      <th className="py-3.5 px-4">Abierto (Pliego)</th>
-                      <th className="py-3.5 px-4">Envolvente (10 hojas + tapa)</th>
-                      <th className="py-3.5 px-4">Foto Tapa + Cuero (10 hojas + tapa)</th>
-                      <th className="py-3.5 px-4 rounded-r-xl">Hoja Adicional</th>
+                    <tr className="bg-[#262422] text-[#FDFCF9] font-serif-luxury text-sm">
+                      <th className="py-3.5 px-4 rounded-l-xl">Tamaño</th>
+                      <th className="py-3.5 px-4">Abierto</th>
+                      <th className="py-3.5 px-4">Tapa envolvente</th>
+                      <th className="py-3.5 px-4">Tapa foto + cuero</th>
+                      <th className="py-3.5 px-4 rounded-r-xl">Hoja extra</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E8E2D5] text-[#1F1C18]">
@@ -566,18 +566,18 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                         key={fmt.id} 
                         className={`hover:bg-[#FAF8F5] transition-colors ${selectedFormatId === fmt.id ? 'bg-[#FAF8F5]/80 font-medium' : ''}`}
                       >
-                        <td className="py-4 px-4 font-bold font-serif-luxury text-sm">
+                        <td className="py-4 px-4 font-bold font-serif-luxury text-base">
                           {fmt.label}
                           {fmt.popular && (
-                            <span className="ml-2 text-[10px] bg-[#8C6D37]/10 text-[#8C6D37] px-2 py-0.5 rounded-full font-sans font-bold">
+                            <span className="ml-2 text-sm bg-[#8C6D37]/10 text-[#8C6D37] px-2 py-0.5 rounded-full font-sans font-bold">
                               Insignia
                             </span>
                           )}
                         </td>
-                        <td className="py-4 px-4 font-mono text-[#736B60]">{fmt.openLabel}</td>
-                        <td className="py-4 px-4 font-mono font-bold text-[#1F1C18]">{formatPriceARS(fmt.basePriceEnvolvente)} ARS</td>
-                        <td className="py-4 px-4 font-mono font-bold text-[#1F1C18]">{formatPriceARS(fmt.basePriceCueroTapa)} ARS</td>
-                        <td className="py-4 px-4 font-mono text-[#8C6D37] font-semibold">+ {formatPriceARS(fmt.extraSheetPrice)} ARS</td>
+                        <td className="py-4 px-4 text-[#736B60]">{fmt.openLabel}</td>
+                        <td className="py-4 px-4 font-bold text-[#1F1C18]">{formatPriceARS(fmt.basePriceEnvolvente)} ARS</td>
+                        <td className="py-4 px-4 font-bold text-[#1F1C18]">{formatPriceARS(fmt.basePriceCueroTapa)} ARS</td>
+                        <td className="py-4 px-4 text-[#8C6D37] font-semibold">+ {formatPriceARS(fmt.extraSheetPrice)} ARS</td>
                       </tr>
                     ))}
                   </tbody>
@@ -585,11 +585,11 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
               </div>
 
               {/* Note for smaller formats */}
-              <div className="mt-6 p-4 rounded-2xl bg-[#FAF8F5] border border-[#E8E2D5] flex items-start gap-3 text-xs text-[#595248]">
+              <div className="mt-6 p-4 rounded-2xl bg-[#FAF8F5] border border-[#E8E2D5] flex items-start gap-3 text-sm text-[#595248]">
                 <Info className="w-4 h-4 text-[#8C6D37] mt-0.5 shrink-0" />
                 <div>
                   <strong className="text-[#1F1C18]">Formatos menores a 30×30 cm y otras terminaciones clásicas:</strong>
-                  <p className="mt-0.5 text-[11px] leading-relaxed">
+                  <p className="mt-0.5 text-sm leading-relaxed">
                     Contamos con la colección clásica en 20×20 cm, 15×15 cm y 30×20 cm con encuadernación en linos puros europeos. Para consultar la lista completa y presupuestos a medida para souvenirs o fotógrafos profesionales, consultanos por WhatsApp.
                   </p>
                 </div>
