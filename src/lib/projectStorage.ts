@@ -210,7 +210,7 @@ export async function persistProjectLocally(
     formatId: sanitizedProject.formatId,
     coverMaterialId: sanitizedProject.coverMaterialId,
     foilColor: sanitizedProject.foilColor,
-    totalPages: (sanitizedProject.spreads || []).length * 2,
+    totalPages: sanitizedProject.album ? sanitizedProject.album.spreads.length * 2 : (sanitizedProject.spreads || []).length * 2,
     totalPrice: totalPrice || 0,
     projectData: sanitizedProject,
     createdAt: sanitizedProject.createdAt || new Date().toISOString(),

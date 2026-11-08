@@ -1,0 +1,1115 @@
+From cdaea84441a3b637cca57cf41020c22539e1bd0f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 8 Nov 2026 17:22:08 +0000
+Subject: [PATCH] Pedido de fotolibro en 4 pasos simples (FotolibroExpress)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- 1 Elegí: 3 fotolibros listos (Esencial, Clásico, Gran formato) con precio.
+- 2 Subí tus fotos: un botón o arrastrar.
+- 3 Tu libro: se arma solo; pasar páginas, 'Otro diseño', quitar foto,
+  título y foto de tapa.
+- 4 Pedí: brillo/mate, caja de regalo (tapa blanda), total y al carrito.
+- Estilo Halo (crema/negro/dorado) con textos cortos y legibles.
+- Las opciones se cambian en FOTOLIBRO_PRESETS (fotolibroCatalog.ts).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017HaRZoFfn6vqKe1ewWaDhS
+---
+ src/App.tsx                         |    6 +-
+ src/components/FotolibroExpress.tsx | 1027 +++++++++++++++++++++++++++
+ src/data/fotolibroCatalog.ts        |   22 +
+ 3 files changed, 1052 insertions(+), 3 deletions(-)
+ create mode 100644 src/components/FotolibroExpress.tsx
+
+diff --git a/src/App.tsx b/src/App.tsx
+index daefedb..216317a 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -18,8 +18,8 @@ import { loadActiveDraftProject, hydratePhotosFromStorage } from './lib/projectS
+ // keeps the heaviest code — PhotobookBuilder (~7k lines), and the jsPDF /
+ // JSZip powered admin & invoice tooling — out of the bundle everyone
+ // downloads just to see the landing page.
+-const SimpleAlbumEditor = lazy(() =>
+-  import('./components/SimpleAlbumEditor').then((m) => ({ default: m.SimpleAlbumEditor }))
++const FotolibroExpress = lazy(() =>
++  import('./components/FotolibroExpress').then((m) => ({ default: m.FotolibroExpress }))
+ );
+ const ConciergeDesignModal = lazy(() =>
+   import('./components/ConciergeDesignModal').then((m) => ({ default: m.ConciergeDesignModal }))
+@@ -488,7 +488,7 @@ function MainAppContent() {
+         {/* Interactive Photobook Builder Modal */}
+         {isBuilderOpen && (
+           <Suspense key="photobook-builder-modal" fallback={<ModalLoadingFallback />}>
+-            <SimpleAlbumEditor
++            <FotolibroExpress
+               initialProject={builderInitialProject}
+               onClose={() => {
+                 setIsBuilderOpen(false);
+diff --git a/src/components/FotolibroExpress.tsx b/src/components/FotolibroExpress.tsx
+new file mode 100644
+index 0000000..bc8b20c
+--- /dev/null
++++ b/src/components/FotolibroExpress.tsx
+@@ -0,0 +1,1027 @@
++// FotolibroExpress — la forma más simple de pedir un fotolibro.
++//
++//   1. Elegí tu fotolibro   (3 opciones listas, un clic)
++//   2. Subí tus fotos       (un botón o arrastrar)
++//   3. Mirá tu libro        (se arma solo; se puede retocar)
++//   4. Pedí                 (brillo/mate, caja, total, al carrito)
++//
++// Estilo: limpio, blanco, letra grande y textos cortos. Un solo botón
++// principal por pantalla. El diseño automático usa src/lib/albumLayout.ts y
++// el pedido viaja igual que el del editor anterior (project.album).
++
++import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
++import { motion, AnimatePresence } from 'motion/react';
++import { ArrowLeft, Check, ChevronLeft, ChevronRight, ImagePlus, Loader2, Package, Shuffle, Trash2, X } from 'lucide-react';
++import { PhotoAsset, PhotobookProject } from '../types';
++import {
++  FOTOLIBRO_PRESETS,
++  FotolibroPreset,
++  FotolibroLaminate,
++  getFotolibroSize,
++  minSheetsFor,
++} from '../data/fotolibroCatalog';
++import {
++  AlbumDesign,
++  AlbumSpread,
++  DEFAULT_SPACING,
++  LayoutPhoto,
++  buildSpreads,
++  layoutSpread,
++  pageSizeMm,
++  placeImage,
++  suggestedSheets,
++} from '../lib/albumLayout';
++import { priceFotolibro } from '../lib/pricing';
++import { formatPriceARS } from '../data/mockData';
++import { batchProcessPhotoFiles } from '../lib/imageProcessor';
++import { uploadOriginalPhoto } from '../lib/photoStorageService';
++import { saveUserProject } from '../lib/supabase';
++import { useAuth } from '../context/AuthContext';
++
++interface Props {
++  onClose: () => void;
++  onAddToCart: (project: PhotobookProject, totalPrice: number) => void;
++  initialProject?: PhotobookProject | null;
++  onOpenAuth?: () => void;
++}
++
++type Step = 'elegir' | 'fotos' | 'libro' | 'pedir';
++const STEPS: Step[] = ['elegir', 'fotos', 'libro', 'pedir'];
++const STEP_LABEL: Record<Step, string> = { elegir: 'Elegí', fotos: 'Subí tus fotos', libro: 'Tu libro', pedir: 'Pedí' };
++
++const FONT = '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
++const SERIF = '"Cormorant Garamond", Georgia, serif';
++const INK = '#1F1C18';
++const GREY = '#5E554B';
++const SOFT = '#F3EEE5';
++const LINE = '#E2D9CA';
++const BLUE = '#8C6D37'; // dorado Halo (acentos)
++const CTA = '#1F1C18'; // botón principal
++const COVER = -1;
++
++// ---------------------------------------------------------------------------
++
++function photoAspect(p?: PhotoAsset): number {
++  if (!p) return 1.5;
++  if (p.width && p.height) return p.width / p.height;
++  return p.aspectRatio || 1.5;
++}
++const displaySrc = (p?: PhotoAsset) => (p ? p.hdDataUrl || p.url || p.thumbnailUrl || '' : '');
++const thumbSrc = (p?: PhotoAsset) => (p ? p.thumbnailUrl || p.hdDataUrl || p.url || '' : '');
++
++function sortPhotos(list: PhotoAsset[]): PhotoAsset[] {
++  return [...list].sort((a, b) => {
++    const da = a.dateTaken || '';
++    const db = b.dateTaken || '';
++    if (da !== db) return da < db ? -1 : 1;
++    return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
++  });
++}
++
++function presetPrice(p: FotolibroPreset): number {
++  return priceFotolibro({ sizeId: p.sizeId, coverType: p.coverType, finish: p.finish, sheets: minSheetsFor(p.coverType) }) ?? 0;
++}
++
++function designFromPreset(p: FotolibroPreset, prev?: AlbumDesign): AlbumDesign {
++  return {
++    version: 1,
++    sizeId: p.sizeId,
++    coverType: p.coverType,
++    finish: p.finish,
++    laminate: prev?.laminate || 'brillo',
++    giftBox: false,
++    cover: { zoom: 1, panX: 0.5, panY: 0.5, title: prev?.cover.title || '', photoId: prev?.cover.photoId },
++    spreads: [],
++    spacing: { ...DEFAULT_SPACING },
++  };
++}
++
++const Img: React.FC<{ photo?: PhotoAsset; frameAspect: number; zoom?: number; panX?: number; panY?: number; thumb?: boolean }> = ({
++  photo,
++  frameAspect,
++  zoom = 1,
++  panX = 0.5,
++  panY = 0.5,
++  thumb,
++}) => {
++  if (!photo) return null;
++  const pl = placeImage(frameAspect, photoAspect(photo), zoom, panX, panY);
++  return (
++    <img
++      src={thumb ? thumbSrc(photo) : displaySrc(photo)}
++      alt=""
++      draggable={false}
++      className="absolute max-w-none select-none pointer-events-none"
++      style={{ width: `${pl.width * 100}%`, height: `${pl.height * 100}%`, left: `${pl.left * 100}%`, top: `${pl.top * 100}%` }}
++    />
++  );
++};
++
++// Ilustración de un libro (para las tarjetas de la pantalla 1).
++const BookArt: React.FC<{ preset: FotolibroPreset; scale: number }> = ({ preset, scale }) => {
++  const size = getFotolibroSize(preset.sizeId);
++  const ratio = size ? size.pageWidthCm / size.pageHeightCm : 1;
++  const h = 150 * scale;
++  const w = h * ratio;
++  const leather = preset.finish === 'foto-tapa-cuero';
++  return (
++    <div className="relative" style={{ width: w + 10, height: h + 8 }}>
++      {/* hojas */}
++      <div className="absolute rounded-[3px]" style={{ left: 8, top: 5, width: w, height: h, background: '#fbfbfb', boxShadow: '0 1px 0 #e5e5e5, 0 2px 0 #eee, 0 3px 0 #e5e5e5' }} />
++      {/* tapa */}
++      <div
++        className="absolute rounded-[3px] overflow-hidden"
++        style={{
++          left: 0,
++          top: 0,
++          width: w,
++          height: h,
++          background: leather ? '#141414' : 'linear-gradient(135deg,#d9c7b0,#a88c6c)',
++          boxShadow: '0 18px 30px -12px rgba(0,0,0,.35), 0 4px 10px rgba(0,0,0,.12)',
++        }}
++      >
++        <div
++          className="absolute"
++          style={
++            leather
++              ? { left: '14%', right: '14%', top: '14%', bottom: '24%', background: 'linear-gradient(160deg,#b9c8d6 0%,#7d93a8 45%,#4f5f52 46%,#7a8a6a 100%)' }
++              : { inset: 0, background: 'linear-gradient(160deg,#c9d6e2 0%,#8fa6bb 50%,#5d6f5c 51%,#8b9b78 100%)' }
++          }
++        />
++        <div className="absolute left-0 top-0 bottom-0" style={{ width: 6, background: 'linear-gradient(90deg,rgba(0,0,0,.25),transparent)' }} />
++      </div>
++    </div>
++  );
++};
++
++// ---------------------------------------------------------------------------
++
++export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initialProject, onOpenAuth }) => {
++  const { user, profile, isLoggedIn } = useAuth();
++  const userId = user?.id || profile?.id;
++  const resume = initialProject?.album?.spreads?.length ? initialProject : null;
++
++  const [projectId] = useState(resume?.id || `proj-${Date.now()}`);
++  const [createdAt] = useState(resume?.createdAt || new Date().toISOString());
++  const [presetId, setPresetId] = useState<string>(() => {
++    const a = resume?.album;
++    return FOTOLIBRO_PRESETS.find((p) => p.sizeId === a?.sizeId && p.coverType === a?.coverType)?.id || FOTOLIBRO_PRESETS[1].id;
++  });
++  const [design, setDesign] = useState<AlbumDesign>(() => resume?.album || designFromPreset(FOTOLIBRO_PRESETS[1]));
++  const [photos, setPhotos] = useState<PhotoAsset[]>(() => resume?.photos || []);
++  const [step, setStep] = useState<Step>(resume ? 'libro' : 'elegir');
++  const [current, setCurrent] = useState(COVER);
++  const [selected, setSelected] = useState<string | null>(null);
++  const [coverPicker, setCoverPicker] = useState(false);
++  const [processing, setProcessing] = useState<{ done: number; total: number } | null>(null);
++  const [dragOver, setDragOver] = useState(false);
++  const [toast, setToast] = useState<string | null>(null);
++  const fileRef = useRef<HTMLInputElement>(null);
++  const stageRef = useRef<HTMLDivElement>(null);
++  const [stage, setStage] = useState({ w: 0, h: 0 });
++
++  const preset = FOTOLIBRO_PRESETS.find((p) => p.id === presetId) || FOTOLIBRO_PRESETS[0];
++  const size = getFotolibroSize(design.sizeId);
++  const minSheets = minSheetsFor(design.coverType);
++  const sheets = design.spreads.length;
++  const pageMm = pageSizeMm(design.sizeId);
++  const pageAspect = pageMm.w / pageMm.h;
++  const spreadAspect = pageAspect * 2;
++  const photoById = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
++
++  useEffect(() => {
++    const prev = document.body.style.overflow;
++    document.body.style.overflow = 'hidden';
++    return () => {
++      document.body.style.overflow = prev;
++    };
++  }, []);
++  useEffect(() => {
++    if (!toast) return;
++    const t = setTimeout(() => setToast(null), 3000);
++    return () => clearTimeout(t);
++  }, [toast]);
++
++  const price =
++    priceFotolibro({
++      sizeId: design.sizeId,
++      coverType: design.coverType,
++      finish: design.finish,
++      sheets: Math.max(sheets, minSheets),
++      giftBox: design.giftBox,
++    }) ?? 0;
++
++  const toLayout = useCallback(
++    (ids: string[]): LayoutPhoto[] => ids.filter((id) => photoById.has(id)).map((id) => ({ id, aspect: photoAspect(photoById.get(id)) })),
++    [photoById]
++  );
++
++  // Arma el libro completo de forma automática.
++  const autoBuild = useCallback((list: PhotoAsset[], d: AlbumDesign): AlbumDesign => {
++    const lp = sortPhotos(list).map((p) => ({ id: p.id, aspect: photoAspect(p) }));
++    const n = suggestedSheets(lp.length, minSheetsFor(d.coverType));
++    const cover = d.cover.photoId && list.some((p) => p.id === d.cover.photoId) ? d.cover.photoId : lp[0]?.id;
++    return { ...d, spreads: buildSpreads(lp, d.sizeId, n, d.spacing), cover: { ...d.cover, photoId: cover } };
++  }, []);
++
++  // -------------------------------------------------------------------------
++  // Fotos
++  // -------------------------------------------------------------------------
++
++  const handleFiles = async (list: FileList | File[] | null) => {
++    if (!list || list.length === 0) return;
++    const files = Array.from(list).filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(f.name));
++    if (!files.length) return;
++    setProcessing({ done: 0, total: files.length });
++    try {
++      const assets = await batchProcessPhotoFiles(files, { maxDimension: 380, quality: 0.8 }, (done, total) => setProcessing({ done, total }));
++      const merged = sortPhotos([...photos, ...assets.map((a) => ({ ...a, uploadStatus: 'pending' as const }))]);
++      setPhotos(merged);
++      // Si ya estaba armado, se vuelve a armar con todas las fotos.
++      if (design.spreads.length) {
++        setDesign((d) => autoBuild(merged, d));
++        setToast(`Sumamos ${assets.length} fotos a tu libro`);
++      }
++    } finally {
++      setProcessing(null);
++      if (fileRef.current) fileRef.current.value = '';
++    }
++  };
++
++  const removePhotoFromList = (id: string) => setPhotos((prev) => prev.filter((p) => p.id !== id));
++
++  // Respaldo de originales en alta (necesita sesión iniciada).
++  const uploading = useRef(new Set<string>());
++  const [retry, setRetry] = useState(0);
++  useEffect(() => {
++    if (!isLoggedIn || !userId) return;
++    const pending = photos.filter(
++      (p) => !p.storagePath && p.uploadStatus !== 'uploaded' && p.uploadStatus !== 'error' && p.url?.startsWith('blob:') && !uploading.current.has(p.id)
++    );
++    if (!pending.length) return;
++    let cancelled = false;
++    (async () => {
++      for (const p of pending) {
++        if (cancelled) break;
++        uploading.current.add(p.id);
++        setPhotos((prev) => prev.map((x) => (x.id === p.id ? { ...x, uploadStatus: 'uploading' } : x)));
++        try {
++          const blob = await fetch(p.url).then((r) => r.blob());
++          const file = new File([blob], p.name || `${p.id}.jpg`, { type: blob.type || 'image/jpeg' });
++          const { storagePath, error } = await uploadOriginalPhoto(userId, projectId, p.id, file);
++          setPhotos((prev) => prev.map((x) => (x.id === p.id ? { ...x, storagePath: storagePath || undefined, uploadStatus: error ? 'error' : 'uploaded' } : x)));
++        } catch {
++          setPhotos((prev) => prev.map((x) => (x.id === p.id ? { ...x, uploadStatus: 'error' } : x)));
++        }
++      }
++    })();
++    return () => {
++      cancelled = true;
++    };
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [isLoggedIn, userId, photos.length, retry]);
++
++  const usedIds = useMemo(() => {
++    const s = new Set<string>();
++    for (const sp of design.spreads) for (const id of sp.photoIds) s.add(id);
++    if (design.cover.photoId) s.add(design.cover.photoId);
++    return s;
++  }, [design.spreads, design.cover.photoId]);
++  const usedPhotos = photos.filter((p) => usedIds.has(p.id));
++  const pendingUploads = isLoggedIn ? usedPhotos.filter((p) => p.uploadStatus === 'uploading' || p.uploadStatus === 'pending').length : 0;
++  const failedUploads = isLoggedIn ? usedPhotos.filter((p) => p.uploadStatus === 'error').length : 0;
++
++  // Guardado automático
++  const buildProject = useCallback(
++    (): PhotobookProject => ({
++      id: projectId,
++      title: design.cover.title.trim() || 'Mi fotolibro',
++      formatId: design.sizeId,
++      coverMaterialId: 'photo-hardcover',
++      foilColor: 'gold',
++      foilTitleText: design.cover.title,
++      foilSubtitleText: '',
++      hasCoverWindow: false,
++      paperFinishId: 'photo-lustre',
++      photos,
++      spreads: [],
++      giftBoxIncluded: design.coverType === 'dura' ? true : design.giftBox,
++      album: design,
++      createdAt,
++      updatedAt: new Date().toISOString(),
++    }),
++    [design, photos, projectId, createdAt]
++  );
++  useEffect(() => {
++    if (!design.spreads.length || !photos.length) return;
++    const t = setTimeout(() => {
++      saveUserProject(userId || 'local-user', buildProject(), price).catch(() => {});
++    }, 1500);
++    return () => clearTimeout(t);
++  }, [design, photos, userId, price, buildProject]);
++
++  // -------------------------------------------------------------------------
++  // Retoques (lo único que se puede tocar en "Tu libro")
++  // -------------------------------------------------------------------------
++
++  const otherDesign = (spreadIndex: number) => {
++    setDesign((d) => {
++      const spreads = d.spreads.map((sp, i) => {
++        if (i !== spreadIndex) return sp;
++        const lp = toLayout(sp.photoIds);
++        const variant = sp.variant + 1;
++        return { ...sp, variant, cells: layoutSpread(lp, d.sizeId, variant, sp.cells, d.spacing) };
++      });
++      return { ...d, spreads };
++    });
++    setSelected(null);
++  };
++
++  const removeFromSpread = (spreadIndex: number, photoId: string) => {
++    const sp = design.spreads[spreadIndex];
++    if (!sp) return;
++    if (sp.photoIds.length <= 1) {
++      setToast('Cada página necesita al menos una foto');
++      return;
++    }
++    setDesign((d) => ({
++      ...d,
++      spreads: d.spreads.map((s, i) => {
++        if (i !== spreadIndex) return s;
++        const lp = toLayout(s.photoIds.filter((id) => id !== photoId));
++        return { ...s, photoIds: lp.map((p) => p.id), variant: 0, cells: layoutSpread(lp, d.sizeId, 0, s.cells, d.spacing) };
++      }),
++    }));
++    setSelected(null);
++  };
++
++  // -------------------------------------------------------------------------
++  // Navegación
++  // -------------------------------------------------------------------------
++
++  const choosePreset = (p: FotolibroPreset) => {
++    setPresetId(p.id);
++    const d = designFromPreset(p, design);
++    if (photos.length) {
++      setDesign(autoBuild(photos, d));
++      setCurrent(COVER);
++      setStep('libro');
++    } else {
++      setDesign(d);
++      setStep('fotos');
++    }
++  };
++
++  const goBuild = () => {
++    setDesign((d) => autoBuild(photos, d));
++    setCurrent(COVER);
++    setStep('libro');
++  };
++
++  const back = () => {
++    const i = STEPS.indexOf(step);
++    if (i <= 0) onClose();
++    else setStep(STEPS[i - 1]);
++  };
++
++  useEffect(() => {
++    const el = stageRef.current;
++    if (!el) return;
++    const ro = new ResizeObserver(([e]) => setStage({ w: e.contentRect.width, h: e.contentRect.height }));
++    ro.observe(el);
++    return () => ro.disconnect();
++  }, [step]);
++
++  const pages = [COVER, ...design.spreads.map((_, i) => i)];
++  const go = (dir: 1 | -1) => {
++    setSelected(null);
++    setCurrent((c) => {
++      const i = pages.indexOf(c) + dir;
++      return pages[Math.max(0, Math.min(pages.length - 1, i))];
++    });
++  };
++  useEffect(() => {
++    if (step !== 'libro') return;
++    const onKey = (e: KeyboardEvent) => {
++      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
++      if (e.key === 'ArrowRight') go(1);
++      if (e.key === 'ArrowLeft') go(-1);
++    };
++    window.addEventListener('keydown', onKey);
++    return () => window.removeEventListener('keydown', onKey);
++  });
++
++  const order = () => {
++    if (!isLoggedIn) {
++      setToast('Ingresá a tu cuenta para recibir tus fotos en alta calidad');
++      onOpenAuth?.();
++      return;
++    }
++    onAddToCart(buildProject(), price);
++  };
++
++  // -------------------------------------------------------------------------
++  // Piezas visuales
++  // -------------------------------------------------------------------------
++
++  const primary = (label: React.ReactNode, onClick: () => void, disabled = false) => (
++    <button
++      type="button"
++      onClick={onClick}
++      disabled={disabled}
++      className="h-11 px-6 rounded-full text-[16px] font-semibold transition-all active:scale-[.98] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#3D352E] inline-flex items-center justify-center gap-2"
++      style={{ background: CTA, color: '#FDFCF9' }}
++    >
++      {label}
++    </button>
++  );
++
++  const renderCover = (thumb = false) => {
++    const photo = photoById.get(design.cover.photoId || '');
++    const leather = design.finish === 'foto-tapa-cuero';
++    const title = design.cover.title.trim();
++    return (
++      <div className="relative w-full h-full overflow-hidden" style={{ background: leather ? '#151515' : '#eee', borderRadius: thumb ? 2 : 4 }}>
++        {leather ? (
++          <div className="absolute overflow-hidden" style={{ left: '12%', right: '12%', top: '12%', bottom: title ? '26%' : '12%' }}>
++            <Img photo={photo} frameAspect={(pageAspect * 0.76) / (title ? 0.62 : 0.76)} thumb={thumb} />
++          </div>
++        ) : (
++          <Img photo={photo} frameAspect={pageAspect} thumb={thumb} />
++        )}
++        {title && !thumb && (
++          <div
++            className="absolute left-0 right-0 text-center px-4 truncate"
++            style={{
++              bottom: leather ? '11%' : '7%',
++              color: leather ? '#e8e2d6' : '#fff',
++              fontSize: 'clamp(12px, 2.2vw, 22px)',
++              letterSpacing: '.04em',
++              textShadow: leather ? 'none' : '0 1px 8px rgba(0,0,0,.45)',
++            }}
++          >
++            {title}
++          </div>
++        )}
++        <div className="absolute left-0 top-0 bottom-0" style={{ width: '3%', background: 'linear-gradient(90deg,rgba(0,0,0,.28),transparent)' }} />
++      </div>
++    );
++  };
++
++  const renderSpread = (sp: AlbumSpread, spreadIndex: number, interactive: boolean, thumb = false) => (
++    <div className="relative w-full h-full bg-white overflow-hidden" style={{ borderRadius: thumb ? 2 : 4 }}>
++      {sp.cells.map((c) => {
++        const frameAspect = (c.w * spreadAspect) / c.h;
++        const isSel = interactive && selected === c.photoId;
++        return (
++          <div
++            key={c.photoId}
++            className="absolute overflow-hidden"
++            onClick={interactive ? (e) => (e.stopPropagation(), setSelected(isSel ? null : c.photoId)) : undefined}
++            style={{
++              left: `${c.x * 100}%`,
++              top: `${c.y * 100}%`,
++              width: `${c.w * 100}%`,
++              height: `${c.h * 100}%`,
++              cursor: interactive ? 'pointer' : 'default',
++              outline: isSel ? `3px solid ${BLUE}` : 'none',
++              outlineOffset: -3,
++            }}
++          >
++            <Img photo={photoById.get(c.photoId)} frameAspect={frameAspect} zoom={c.zoom} panX={c.panX} panY={c.panY} thumb={thumb} />
++            {isSel && (
++              <button
++                type="button"
++                onClick={(e) => {
++                  e.stopPropagation();
++                  removeFromSpread(spreadIndex, c.photoId);
++                }}
++                className="absolute top-2 right-2 h-9 px-3 rounded-full bg-white/95 text-[14px] font-medium inline-flex items-center gap-1.5 shadow-lg"
++                style={{ color: '#d70015' }}
++              >
++                <Trash2 className="w-4 h-4" /> Quitar
++              </button>
++            )}
++          </div>
++        );
++      })}
++      {/* pliegue central */}
++      <div
++        className="absolute top-0 bottom-0 pointer-events-none"
++        style={{ left: '47%', width: '6%', background: 'linear-gradient(90deg,transparent,rgba(0,0,0,.10) 48%,rgba(0,0,0,.16) 50%,rgba(0,0,0,.10) 52%,transparent)' }}
++      />
++    </div>
++  );
++
++  // -------------------------------------------------------------------------
++  // Pantallas
++  // -------------------------------------------------------------------------
++
++  const screenElegir = (
++    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
++      <h1 className="text-center font-semibold leading-tight" style={{ fontFamily: SERIF, fontSize: 'clamp(34px,4.5vw,48px)', color: INK }}>
++        Elegí tu fotolibro
++      </h1>
++      <p className="text-center mt-2 text-[18px]" style={{ color: GREY }}>
++        Vos subís las fotos. Nosotros lo armamos y lo imprimimos.
++      </p>
++      <div className="grid md:grid-cols-3 gap-4 mt-6">
++        {FOTOLIBRO_PRESETS.map((p, i) => {
++          const s = getFotolibroSize(p.sizeId);
++          const min = minSheetsFor(p.coverType);
++          return (
++            <button
++              key={p.id}
++              type="button"
++              onClick={() => choosePreset(p)}
++              className="group text-left rounded-2xl p-5 flex flex-col transition-all hover:-translate-y-1 hover:shadow-[0_20px_40px_-20px_rgba(0,0,0,.25)]"
++              style={{ background: SOFT, outline: p.badge ? `2px solid ${BLUE}` : 'none' }}
++            >
++              <div className="h-5 text-[13px] font-semibold" style={{ color: BLUE }}>
++                {p.badge || ''}
++              </div>
++              <div className="h-[120px] md:h-[170px] flex items-end justify-center">
++                <div className="scale-75 md:scale-100 origin-bottom"><BookArt preset={p} scale={0.72 + i * 0.2} /></div>
++              </div>
++              <div className="mt-4 text-[30px] font-semibold leading-none" style={{ color: INK, fontFamily: SERIF }}>
++                {p.name}
++              </div>
++              <div className="text-[17px] mt-0.5" style={{ color: INK }}>
++                {s?.closedLabel} · {p.coverType === 'dura' ? 'Tapa dura' : 'Tapa blanda'}
++              </div>
++              <p className="text-[16px] mt-2 leading-snug flex-1" style={{ color: GREY }}>
++                {p.tagline}
++              </p>
++              <div className="mt-4 flex items-end justify-between gap-3">
++                <div>
++                  <div className="text-[14px]" style={{ color: GREY }}>Desde</div>
++                  <div className="text-[22px] font-semibold tabular-nums" style={{ color: INK }}>{formatPriceARS(presetPrice(p))}</div>
++                  <div className="text-[14px]" style={{ color: GREY }}>{min * 2} páginas incluidas</div>
++                </div>
++                <span
++                  className="h-10 px-5 rounded-full text-[15px] font-semibold inline-flex items-center transition-colors group-hover:bg-[#3D352E]"
++                  style={{ background: CTA, color: '#FDFCF9' }}
++                >
++                  Elegir
++                </span>
++              </div>
++            </button>
++          );
++        })}
++      </div>
++      <div className="mt-6 flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-[15px]" style={{ color: GREY }}>
++        <span className="inline-flex items-center gap-2"><Check className="w-4 h-4" style={{ color: '#1a8f3c' }} /> Papel fotográfico</span>
++        <span className="inline-flex items-center gap-2"><Check className="w-4 h-4" style={{ color: '#1a8f3c' }} /> Hojas rígidas que abren planas</span>
++        <span className="inline-flex items-center gap-2"><Check className="w-4 h-4" style={{ color: '#1a8f3c' }} /> Lo ves terminado antes de pagar</span>
++      </div>
++    </div>
++  );
++
++  const recommended = `${minSheets * 2 * 2} y ${minSheets * 2 * 5}`;
++  const screenFotos = (
++    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-28">
++      <h1 className="text-center font-semibold leading-tight" style={{ fontFamily: SERIF, fontSize: 'clamp(32px,4.2vw,44px)', color: INK }}>
++        Subí tus fotos
++      </h1>
++      <p className="text-center mt-2 text-[18px]" style={{ color: GREY }}>
++        Te recomendamos entre {recommended} fotos. Las ordenamos por fecha.
++      </p>
++
++      <div
++        onDragOver={(e) => {
++          e.preventDefault();
++          setDragOver(true);
++        }}
++        onDragLeave={() => setDragOver(false)}
++        onDrop={(e) => {
++          e.preventDefault();
++          setDragOver(false);
++          handleFiles(e.dataTransfer.files);
++        }}
++        onClick={() => !processing && fileRef.current?.click()}
++        className="mt-6 rounded-2xl cursor-pointer flex flex-col items-center justify-center text-center transition-colors"
++        style={{
++          minHeight: photos.length ? 120 : 240,
++          background: dragOver ? '#EFE4CF' : SOFT,
++          border: `2px dashed ${dragOver ? BLUE : LINE}`,
++        }}
++      >
++        {processing ? (
++          <>
++            <Loader2 className="w-9 h-9 animate-spin" style={{ color: BLUE }} />
++            <div className="mt-4 text-[19px] font-medium" style={{ color: INK }}>
++              Cargando {processing.done} de {processing.total}…
++            </div>
++            <div className="mt-3 w-64 h-1.5 rounded-full overflow-hidden" style={{ background: LINE }}>
++              <div className="h-full transition-all" style={{ background: BLUE, width: `${(processing.done / Math.max(1, processing.total)) * 100}%` }} />
++            </div>
++          </>
++        ) : (
++          <>
++            <ImagePlus className="w-10 h-10" style={{ color: BLUE }} />
++            <div className="mt-4 text-[21px] font-medium" style={{ color: INK }}>
++              {photos.length ? 'Agregar más fotos' : 'Elegí tus fotos'}
++            </div>
++            <div className="mt-1 text-[15px]" style={{ color: GREY }}>
++              o arrastralas acá
++            </div>
++          </>
++        )}
++      </div>
++
++      {photos.length > 0 && (
++        <>
++          <div className="mt-8 flex items-baseline justify-between">
++            <div className="text-[19px] font-semibold" style={{ color: INK }}>
++              {photos.length} {photos.length === 1 ? 'foto' : 'fotos'}
++            </div>
++          </div>
++          <div className="mt-3 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-1.5">
++            {photos.map((p) => (
++              <div key={p.id} className="group relative aspect-square overflow-hidden rounded-md" style={{ background: SOFT }}>
++                <img src={thumbSrc(p)} alt="" className="w-full h-full object-cover" draggable={false} />
++                <button
++                  type="button"
++                  onClick={() => removePhotoFromList(p.id)}
++                  className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 text-white items-center justify-center hidden group-hover:flex"
++                  aria-label="Quitar foto"
++                >
++                  <X className="w-4 h-4" />
++                </button>
++              </div>
++            ))}
++          </div>
++        </>
++      )}
++
++      <div className="fixed bottom-0 left-0 right-0 border-t backdrop-blur-xl" style={{ background: 'rgba(253,252,249,.9)', borderColor: LINE }}>
++        <div className="max-w-4xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
++          <div className="text-[15px]" style={{ color: GREY }}>
++            {photos.length < minSheets ? `Necesitás al menos ${minSheets} fotos` : 'Listo. Armamos tu libro en un segundo.'}
++          </div>
++          {primary('Armar mi libro', goBuild, photos.length < minSheets || !!processing)}
++        </div>
++      </div>
++    </div>
++  );
++
++  const onCover = current === COVER;
++  const spread = onCover ? undefined : design.spreads[current];
++  const pageNumber = pages.indexOf(current);
++
++  const screenLibro = (
++    <div className="flex flex-col h-full" onClick={() => setSelected(null)}>
++      <div className="text-center pt-4 sm:pt-5 px-4">
++        <h1 className="font-semibold leading-tight" style={{ fontFamily: SERIF, fontSize: 'clamp(28px,3.4vw,38px)', color: INK }}>
++          Así queda tu libro
++        </h1>
++        <p className="mt-1.5 text-[17px]" style={{ color: GREY }}>
++          Pasá las páginas. Si querés, tocá una foto para quitarla.
++        </p>
++      </div>
++
++      {/* página grande */}
++      <div className="flex-1 min-h-0 flex items-center justify-center gap-2 sm:gap-6 px-2 sm:px-8 py-3">
++        <button
++          type="button"
++          onClick={(e) => (e.stopPropagation(), go(-1))}
++          disabled={pageNumber <= 0}
++          className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center disabled:opacity-0 transition-opacity"
++          style={{ background: SOFT, color: INK }}
++          aria-label="Anterior"
++        >
++          <ChevronLeft className="w-6 h-6" />
++        </button>
++        <div ref={stageRef} className="h-full w-full flex items-center justify-center min-w-0">
++          <AnimatePresence mode="wait">
++            <motion.div
++              key={current}
++              initial={{ opacity: 0, scale: 0.985 }}
++              animate={{ opacity: 1, scale: 1 }}
++              exit={{ opacity: 0, scale: 0.985 }}
++              transition={{ duration: 0.18 }}
++              className="relative"
++              style={{
++                ...(() => {
++                  const a = onCover ? pageAspect : spreadAspect;
++                  const w = Math.min(stage.w, stage.h * a);
++                  return { width: w, height: w / a };
++                })(),
++                boxShadow: '0 30px 60px -25px rgba(0,0,0,.35), 0 8px 20px -8px rgba(0,0,0,.12)',
++                borderRadius: 4,
++              }}
++            >
++              {onCover ? renderCover() : spread && renderSpread(spread, current, true)}
++            </motion.div>
++          </AnimatePresence>
++        </div>
++        <button
++          type="button"
++          onClick={(e) => (e.stopPropagation(), go(1))}
++          disabled={pageNumber >= pages.length - 1}
++          className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center disabled:opacity-0 transition-opacity"
++          style={{ background: SOFT, color: INK }}
++          aria-label="Siguiente"
++        >
++          <ChevronRight className="w-6 h-6" />
++        </button>
++      </div>
++
++      {/* una sola acción por página */}
++      <div className="h-12 flex items-center justify-center gap-3 px-5" onClick={(e) => e.stopPropagation()}>
++        {onCover ? (
++          <>
++            <input
++              value={design.cover.title}
++              onChange={(e) => setDesign((d) => ({ ...d, cover: { ...d.cover, title: e.target.value.slice(0, 40) } }))}
++              placeholder="Título de tapa (opcional)"
++              className="h-10 w-56 sm:w-72 rounded-full px-4 text-[15px] outline-none focus:ring-2"
++              style={{ background: SOFT, color: INK }}
++            />
++            <button
++              type="button"
++              onClick={() => setCoverPicker(true)}
++              className="h-10 px-4 rounded-full text-[15px] font-medium"
++              style={{ color: BLUE }}
++            >
++              Cambiar foto
++            </button>
++          </>
++        ) : (
++          <button
++            type="button"
++            onClick={() => otherDesign(current)}
++            className="h-10 px-5 rounded-full text-[15px] font-medium inline-flex items-center gap-2 hover:bg-[#EAE2D3] transition-colors"
++            style={{ background: SOFT, color: INK }}
++          >
++            <Shuffle className="w-4 h-4" /> Otro diseño
++          </button>
++        )}
++      </div>
++
++      {/* miniaturas */}
++      <div className="px-4 sm:px-8 pt-3 pb-3 overflow-x-auto">
++        <div className="flex gap-2.5 w-max mx-auto items-end">
++          {pages.map((pg, i) => {
++            const active = pg === current;
++            const h = 46;
++            return (
++              <button
++                key={pg === COVER ? 'cover' : design.spreads[pg].id}
++                type="button"
++                onClick={(e) => (e.stopPropagation(), setSelected(null), setCurrent(pg))}
++                className="flex flex-col items-center gap-1"
++              >
++                <div
++                  className="relative transition-all"
++                  style={{
++                    height: h,
++                    width: h * (pg === COVER ? pageAspect : spreadAspect),
++                    outline: active ? `2px solid ${BLUE}` : `1px solid ${LINE}`,
++                    outlineOffset: active ? 2 : 0,
++                    borderRadius: 2,
++                    opacity: active ? 1 : 0.8,
++                  }}
++                >
++                  {pg === COVER ? renderCover(true) : renderSpread(design.spreads[pg], pg, false, true)}
++                </div>
++                <span className="text-[11px]" style={{ color: active ? INK : GREY }}>
++                  {pg === COVER ? 'Tapa' : `${i * 2 - 1}-${i * 2}`}
++                </span>
++              </button>
++            );
++          })}
++        </div>
++      </div>
++
++      <div className="border-t" style={{ borderColor: LINE }}>
++        <div className="max-w-5xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
++          <div>
++            <div className="text-[20px] font-semibold tabular-nums" style={{ color: INK }}>{formatPriceARS(price)}</div>
++            <div className="text-[13px]" style={{ color: GREY }}>
++              {preset.name} · {sheets * 2} páginas · {usedPhotos.length} fotos
++            </div>
++          </div>
++          {primary('Continuar', () => setStep('pedir'))}
++        </div>
++      </div>
++
++      {/* elegir foto de tapa */}
++      <AnimatePresence>
++        {coverPicker && (
++          <motion.div
++            initial={{ opacity: 0 }}
++            animate={{ opacity: 1 }}
++            exit={{ opacity: 0 }}
++            className="fixed inset-0 z-10 bg-black/40 flex items-end sm:items-center justify-center"
++            onClick={() => setCoverPicker(false)}
++          >
++            <motion.div
++              initial={{ y: 30 }}
++              animate={{ y: 0 }}
++              exit={{ y: 30 }}
++              className="bg-white w-full sm:max-w-2xl max-h-[80vh] rounded-t-2xl sm:rounded-2xl overflow-hidden flex flex-col"
++              onClick={(e) => e.stopPropagation()}
++            >
++              <div className="flex items-center justify-between px-6 h-16 shrink-0">
++                <div className="text-[19px] font-semibold" style={{ color: INK }}>Elegí la foto de tapa</div>
++                <button type="button" onClick={() => setCoverPicker(false)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: SOFT }} aria-label="Cerrar">
++                  <X className="w-5 h-5" />
++                </button>
++              </div>
++              <div className="overflow-y-auto px-6 pb-6 grid grid-cols-4 sm:grid-cols-5 gap-1.5">
++                {photos.map((p) => (
++                  <button
++                    key={p.id}
++                    type="button"
++                    onClick={() => {
++                      setDesign((d) => ({ ...d, cover: { ...d.cover, photoId: p.id, zoom: 1, panX: 0.5, panY: 0.5 } }));
++                      setCoverPicker(false);
++                    }}
++                    className="aspect-square overflow-hidden rounded-md"
++                    style={{ outline: design.cover.photoId === p.id ? `3px solid ${BLUE}` : 'none', outlineOffset: -3 }}
++                  >
++                    <img src={thumbSrc(p)} alt="" className="w-full h-full object-cover" draggable={false} />
++                  </button>
++                ))}
++              </div>
++            </motion.div>
++          </motion.div>
++        )}
++      </AnimatePresence>
++    </div>
++  );
++
++  const boxAvailable = design.coverType === 'blanda' && !!size?.boxPrice;
++  const boxPrice = size?.boxPrice || 0;
++  const screenPedir = (
++    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
++      <div className="grid md:grid-cols-2 gap-8 md:gap-12 items-center">
++        <div className="flex justify-center">
++          <div
++            className="relative w-full max-w-[380px]"
++            style={{ aspectRatio: `${pageAspect}`, boxShadow: '0 40px 70px -30px rgba(0,0,0,.45), 0 10px 24px -10px rgba(0,0,0,.15)', borderRadius: 4 }}
++          >
++            {renderCover()}
++          </div>
++        </div>
++
++        <div>
++          <h1 className="font-semibold leading-tight" style={{ fontFamily: SERIF, fontSize: 'clamp(34px,4vw,46px)', color: INK }}>
++            Tu {preset.name}
++          </h1>
++          <div className="mt-1 text-[17px]" style={{ color: GREY }}>
++            {size?.closedLabel} · {design.coverType === 'dura' ? 'Tapa dura' : 'Tapa blanda'} · {sheets * 2} páginas
++          </div>
++
++          <div className="mt-6">
++            <div className="text-[17px] font-semibold" style={{ color: INK }}>Terminación de las fotos</div>
++            <div className="mt-3 inline-flex p-1 rounded-full" style={{ background: SOFT }}>
++              {(['brillo', 'mate'] as FotolibroLaminate[]).map((l) => (
++                <button
++                  key={l}
++                  type="button"
++                  onClick={() => setDesign((d) => ({ ...d, laminate: l }))}
++                  className="h-9 px-6 rounded-full text-[16px] font-medium capitalize transition-all"
++                  style={{
++                    background: design.laminate === l ? '#fff' : 'transparent',
++                    color: INK,
++                    boxShadow: design.laminate === l ? '0 2px 8px rgba(0,0,0,.12)' : 'none',
++                  }}
++                >
++                  {l}
++                </button>
++              ))}
++            </div>
++          </div>
++
++          {boxAvailable && (
++            <button
++              type="button"
++              onClick={() => setDesign((d) => ({ ...d, giftBox: !d.giftBox }))}
++              className="mt-5 w-full text-left rounded-2xl p-4 flex items-center gap-4 transition-all"
++              style={{ background: SOFT, outline: design.giftBox ? `2px solid ${BLUE}` : 'none' }}
++            >
++              <Package className="w-8 h-8 shrink-0" style={{ color: INK }} />
++              <div className="flex-1">
++                <div className="text-[17px] font-semibold" style={{ color: INK }}>Sumá una caja de regalo</div>
++                <div className="text-[15px]" style={{ color: GREY }}>Lo protege y llega listo para regalar · +{formatPriceARS(boxPrice)}</div>
++              </div>
++              <div
++                className="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
++                style={{ background: design.giftBox ? BLUE : '#fff', border: design.giftBox ? 'none' : `1.5px solid ${LINE}` }}
++              >
++                {design.giftBox && <Check className="w-4 h-4 text-white" />}
++              </div>
++            </button>
++          )}
++          {design.coverType === 'dura' && (
++            <div className="mt-6 text-[15px] inline-flex items-center gap-2" style={{ color: GREY }}>
++              <Package className="w-5 h-5" /> Incluye caja de regalo
++            </div>
++          )}
++
++          <div className="mt-6 pt-5 border-t flex items-baseline justify-between" style={{ borderColor: LINE }}>
++            <span className="text-[17px]" style={{ color: INK }}>Total</span>
++            <span className="text-[28px] font-semibold tabular-nums" style={{ color: INK }}>{formatPriceARS(price)}</span>
++          </div>
++
++          <div className="mt-5">
++            {pendingUploads > 0 ? (
++              <div className="w-full">
++                {primary(
++                  <>
++                    <Loader2 className="w-5 h-5 animate-spin" /> Guardando tus fotos… {usedPhotos.length - pendingUploads}/{usedPhotos.length}
++                  </>,
++                  () => {},
++                  true
++                )}
++              </div>
++            ) : (
++              <div className="[&>button]:w-full">{primary(isLoggedIn ? 'Agregar al carrito' : 'Ingresar y pedir', order, failedUploads > 0)}</div>
++            )}
++            {failedUploads > 0 && (
++              <div className="mt-3 text-[15px]" style={{ color: '#d70015' }}>
++                {failedUploads} fotos no se pudieron guardar.{' '}
++                <button
++                  type="button"
++                  className="underline"
++                  onClick={() => {
++                    uploading.current.clear();
++                    setPhotos((prev) => prev.map((p) => (p.uploadStatus === 'error' ? { ...p, uploadStatus: 'pending' } : p)));
++                    setRetry((n) => n + 1);
++                  }}
++                >
++                  Reintentar
++                </button>
++              </div>
++            )}
++            {!isLoggedIn && (
++              <div className="mt-3 text-[14px] text-center" style={{ color: GREY }}>
++                Necesitamos tu cuenta para recibir las fotos en alta calidad.
++              </div>
++            )}
++          </div>
++        </div>
++      </div>
++    </div>
++  );
++
++  // -------------------------------------------------------------------------
++
++  const stepIndex = STEPS.indexOf(step);
++  return (
++    <div className="fixed inset-0 z-50 flex flex-col " style={{ fontFamily: FONT, color: INK, background: '#FDFCF9' }} role="dialog" aria-modal="true" aria-label="Pedir fotolibro">
++      <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} />
++
++      {/* barra superior */}
++      <div className="h-14 shrink-0 flex items-center justify-between px-3 sm:px-5 border-b" style={{ borderColor: LINE }}>
++        <button type="button" onClick={back} className="h-9 px-2 rounded-full inline-flex items-center gap-1 text-[15px]" style={{ color: BLUE }}>
++          <ArrowLeft className="w-5 h-5" /> <span className="hidden sm:inline">{stepIndex === 0 ? 'Salir' : 'Atrás'}</span>
++        </button>
++        <div className="flex items-center gap-1.5 sm:gap-3">
++          {STEPS.map((s, i) => (
++            <div key={s} className="flex items-center gap-1.5 sm:gap-3">
++              <div className="flex items-center gap-2">
++                <div
++                  className="w-6 h-6 rounded-full flex items-center justify-center text-[12px] font-semibold"
++                  style={{ background: i <= stepIndex ? INK : SOFT, color: i <= stepIndex ? '#fff' : GREY }}
++                >
++                  {i < stepIndex ? <Check className="w-3.5 h-3.5" /> : i + 1}
++                </div>
++                <span className="hidden md:inline text-[14px]" style={{ color: i === stepIndex ? INK : GREY, fontWeight: i === stepIndex ? 600 : 400 }}>
++                  {STEP_LABEL[s]}
++                </span>
++              </div>
++              {i < STEPS.length - 1 && <div className="w-4 sm:w-8 h-px" style={{ background: LINE }} />}
++            </div>
++          ))}
++        </div>
++        <button type="button" onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: SOFT }} aria-label="Cerrar">
++          <X className="w-5 h-5" />
++        </button>
++      </div>
++
++      <div className={`flex-1 min-h-0 ${step === 'libro' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
++        {step === 'elegir' && screenElegir}
++        {step === 'fotos' && screenFotos}
++        {step === 'libro' && screenLibro}
++        {step === 'pedir' && screenPedir}
++      </div>
++
++      <AnimatePresence>
++        {toast && (
++          <motion.div
++            initial={{ opacity: 0, y: 10 }}
++            animate={{ opacity: 1, y: 0 }}
++            exit={{ opacity: 0, y: 10 }}
++            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-20 px-5 py-3 rounded-full text-[15px] text-white shadow-xl"
++            style={{ background: 'rgba(29,29,31,.92)' }}
++          >
++            {toast}
++          </motion.div>
++        )}
++      </AnimatePresence>
++    </div>
++  );
++};
+diff --git a/src/data/fotolibroCatalog.ts b/src/data/fotolibroCatalog.ts
+index d8f251a..8a932ab 100644
+--- a/src/data/fotolibroCatalog.ts
++++ b/src/data/fotolibroCatalog.ts
+@@ -74,3 +74,25 @@ export function getFotolibroSize(id?: string): FotolibroSize | undefined {
+ export function minSheetsFor(cover: FotolibroCoverType): number {
+   return cover === 'dura' ? MIN_SHEETS_DURA : MIN_SHEETS_BLANDA;
+ }
++
++// ---------------------------------------------------------------------------
++// Fotolibros "listos para elegir" (pantalla 1 de FotolibroExpress).
++// Para cambiar qué se ofrece, editar SOLO esta lista: medida (sizeId de
++// FOTOLIBRO_SIZES) + tipo de tapa. El precio sale solo de la lista oficial.
++// ---------------------------------------------------------------------------
++
++export interface FotolibroPreset {
++  id: string;
++  name: string;
++  tagline: string;
++  sizeId: string;
++  coverType: FotolibroCoverType;
++  finish: FotolibroFinish;
++  badge?: string;
++}
++
++export const FOTOLIBRO_PRESETS: FotolibroPreset[] = [
++  { id: 'esencial', name: 'Esencial', tagline: 'Tapa blanda con tu foto. Liviano y perfecto para regalar.', sizeId: '20x20', coverType: 'blanda', finish: 'envolvente' },
++  { id: 'clasico', name: 'Clásico', tagline: 'Tapa dura con foto y contratapa de cuero negro. Incluye caja.', sizeId: '30x30', coverType: 'dura', finish: 'foto-tapa-cuero', badge: 'El más elegido' },
++  { id: 'gran-formato', name: 'Gran formato', tagline: 'Nuestro libro más grande, para tus fotos más importantes. Incluye caja.', sizeId: '40x40', coverType: 'dura', finish: 'foto-tapa-cuero' },
++];
+-- 
+2.43.0
+

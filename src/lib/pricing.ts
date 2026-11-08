@@ -19,6 +19,7 @@ import {
   PHOTOBOOK_GRANDES_FORMATOS,
   FINE_ART_PRINTS_PRODUCT,
 } from '../data/mockData';
+import { getFotolibroSize, minSheetsFor, MAX_SHEETS } from '../data/fotolibroCatalog';
 
 // Kept in sync with PhotobookBuilder.tsx's `giftBoxCost` (not broken out as
 // its own named export there).
@@ -101,4 +102,43 @@ export function priceFineArtPrint(input: FineArtPrintPricingInput): number | nul
   const quantity = Math.max(1, Math.floor(Number(input.quantity) || 1));
   const unitPrice = Math.round(size.price * paper.priceMultiplier);
   return unitPrice * quantity;
+}
+
+export interface FotolibroPricingInput {
+  sizeId?: string;
+  coverType?: string;
+  finish?: string;
+  sheets?: number;
+  giftBox?: boolean;
+}
+
+/**
+ * Precio exacto de un fotolibro armado en el editor simple
+ * (SimpleAlbumEditor.tsx, ítem 'fotolibro'), según la lista oficial
+ * (src/data/fotolibroCatalog.ts):
+ *   - Tapa blanda: precio de 7 hojas (hasta 7) o de 10 hojas (8 a 10),
+ *     + hoja adicional desde la 11; caja contenedora opcional aparte.
+ *   - Tapa dura (envolvente o foto tapa + cuero): precio fijo con 10 hojas y
+ *     caja incluida, + hoja adicional desde la 11.
+ * 1 hoja = 1 doble página. Devuelve null si la configuración no existe.
+ */
+export function priceFotolibro(input: FotolibroPricingInput): number | null {
+  const size = getFotolibroSize(input.sizeId);
+  if (!size) return null;
+  const coverType = input.coverType;
+  if (coverType !== 'blanda' && coverType !== 'dura') return null;
+  const finish = input.finish;
+  if (coverType === 'blanda' && finish !== 'envolvente') return null;
+  if (coverType === 'dura' && finish !== 'envolvente' && finish !== 'foto-tapa-cuero') return null;
+
+  const sheets = Math.floor(Number(input.sheets) || 0);
+  if (sheets < minSheetsFor(coverType) || sheets > MAX_SHEETS) return null;
+  const extraSheets = Math.max(0, sheets - 10);
+
+  if (coverType === 'dura') {
+    return size.dura.price + extraSheets * size.dura.extraSheet;
+  }
+  const base = sheets <= 7 ? size.blanda.sheets7 : size.blanda.sheets10;
+  const box = input.giftBox && size.boxPrice ? size.boxPrice : 0;
+  return base + extraSheets * size.blanda.extraSheet + box;
 }

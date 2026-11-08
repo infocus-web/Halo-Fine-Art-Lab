@@ -6,13 +6,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { MercadoPagoConfig, Preference } from 'mercadopago';
 import { getSupabaseAdmin } from './_supabaseAdmin.js';
-import { priceCustomAlbum, pricePhotobookOrder, priceFineArtPrint } from '../src/lib/pricing.js';
+import { priceCustomAlbum, pricePhotobookOrder, priceFineArtPrint, priceFotolibro } from '../src/lib/pricing.js';
 
 interface CartItemPayload {
   // Which pricing formula applies to this item — see ../src/lib/pricing.ts.
   // Older clients (before this field existed) won't send it; treated as
   // 'custom-album' below since that was the only type previously checked.
-  type?: 'custom-album' | 'photobook-order' | 'fine-art-print' | 'concierge-request';
+  type?: 'custom-album' | 'photobook-order' | 'fine-art-print' | 'concierge-request' | 'fotolibro';
   title: string;
   price: number;
   previewUrl?: string;
@@ -30,6 +30,15 @@ interface CartItemPayload {
   // --- 'photobook-order' (ProductCatalog.tsx — "Gran Formato") ---
   photobookFormatId?: string;
   extraSheets?: number;
+
+  // --- 'fotolibro' (SimpleAlbumEditor.tsx — editor simple) ---
+  fotolibroSizeId?: string;
+  fotolibroCoverType?: string;
+  fotolibroFinish?: string;
+  fotolibroSheets?: number;
+  fotolibroGiftBox?: boolean;
+  // Diagramación completa para el laboratorio (se guarda en items_json).
+  albumLayout?: unknown;
 
   // --- 'fine-art-print' (ProductCatalog.tsx) ---
   printSizeId?: string;
@@ -89,6 +98,14 @@ function expectedItemPrice(item: CartItemPayload): number | null {
         formatId: item.photobookFormatId,
         extraSheets: item.extraSheets,
       });
+    case 'fotolibro':
+      return priceFotolibro({
+        sizeId: item.fotolibroSizeId,
+        coverType: item.fotolibroCoverType,
+        finish: item.fotolibroFinish,
+        sheets: item.fotolibroSheets,
+        giftBox: item.fotolibroGiftBox,
+      });
     case 'fine-art-print':
       return priceFineArtPrint({
         sizeId: item.printSizeId,
@@ -130,6 +147,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   for (const it of body.items) {
     const expectedPrice = expectedItemPrice(it);
     const declaredPrice = Number(it.price) || 0;
+    // Un fotolibro del editor simple siempre tiene precio de catálogo: si la
+    // configuración no existe, se rechaza en vez de confiar en el precio.
+    if (it.type === 'fotolibro' && expectedPrice === null) {
+      return res.status(400).json({ error: 'La configuración del fotolibro no es válida. Recargá la página e intentá de nuevo.' });
+    }
     if (expectedPrice !== null && Math.abs(declaredPrice - expectedPrice) > 1) {
       console.warn(
         `[create-preference] Precio rechazado para "${it.title}": declarado $${declaredPrice}, catálogo $${expectedPrice}.`

@@ -18,8 +18,8 @@ import { loadActiveDraftProject, hydratePhotosFromStorage } from './lib/projectS
 // keeps the heaviest code — PhotobookBuilder (~7k lines), and the jsPDF /
 // JSZip powered admin & invoice tooling — out of the bundle everyone
 // downloads just to see the landing page.
-const PhotobookBuilder = lazy(() =>
-  import('./components/PhotobookBuilder').then((m) => ({ default: m.PhotobookBuilder }))
+const FotolibroExpress = lazy(() =>
+  import('./components/FotolibroExpress').then((m) => ({ default: m.FotolibroExpress }))
 );
 const ConciergeDesignModal = lazy(() =>
   import('./components/ConciergeDesignModal').then((m) => ({ default: m.ConciergeDesignModal }))
@@ -54,6 +54,7 @@ import {
   EmailNotification 
 } from './types';
 import { SAMPLE_ORDERS } from './data/mockData';
+import { getFotolibroSize, COVER_OPTIONS } from './data/fotolibroCatalog';
 import { generateStatusEmail } from './lib/emailNotificationService';
 import { Sparkles, MessageCircle, BookOpen, Package, Mail } from 'lucide-react';
 
@@ -202,6 +203,33 @@ function MainAppContent() {
   };
 
   const handleAddProjectToCart = (project: PhotobookProject, totalPrice: number) => {
+    const album = project.album;
+    if (album) {
+      const size = getFotolibroSize(album.sizeId);
+      const coverName = COVER_OPTIONS.find((o) => o.type === album.coverType && o.finish === album.finish)?.name || 'Fotolibro';
+      const sheets = album.spreads.length;
+      const giftBox = album.coverType === 'dura' ? true : album.giftBox;
+      const fotolibroItem: CartItem = {
+        id: `cart-${Date.now()}`,
+        type: 'fotolibro',
+        title: `Fotolibro ${size?.closedLabel || album.sizeId}${project.title && project.title !== 'Mi fotolibro' ? ` · ${project.title}` : ''}`,
+        details: `${coverName} · Laminado ${album.laminate} · ${sheets} hojas (${sheets * 2} páginas)${giftBox ? ' · Con caja' : ''}`,
+        price: totalPrice,
+        project,
+        fotolibroConfig: {
+          sizeId: album.sizeId,
+          coverType: album.coverType,
+          finish: album.finish,
+          laminate: album.laminate,
+          sheets,
+          giftBox,
+        },
+      };
+      setCartItems((prev) => [fotolibroItem, ...prev]);
+      setIsBuilderOpen(false);
+      setIsCartOpen(true);
+      return;
+    }
     const newItem: CartItem = {
       id: `cart-${Date.now()}`,
       type: 'custom-album',
@@ -460,7 +488,7 @@ function MainAppContent() {
         {/* Interactive Photobook Builder Modal */}
         {isBuilderOpen && (
           <Suspense key="photobook-builder-modal" fallback={<ModalLoadingFallback />}>
-            <PhotobookBuilder
+            <FotolibroExpress
               initialProject={builderInitialProject}
               onClose={() => {
                 setIsBuilderOpen(false);

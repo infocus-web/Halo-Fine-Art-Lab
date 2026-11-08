@@ -5,9 +5,10 @@ import confetti from 'canvas-confetti';
 import { PhotobookProject, DesignServiceRequest, TrackedOrder } from '../types';
 import { BOOK_FORMATS, COVER_MATERIALS, PAPER_FINISHES, formatPriceARS, STORE_CONFIG } from '../data/mockData';
 import { saveOrderToDatabase, isSupabaseConfigured } from '../lib/supabase';
+import { buildAlbumLabLayout } from '../lib/albumOrder';
 
 export interface CartItem {
-  type: 'custom-album' | 'concierge-request' | 'photobook-order' | 'fine-art-print';
+  type: 'custom-album' | 'concierge-request' | 'photobook-order' | 'fine-art-print' | 'fotolibro';
   id: string;
   title: string;
   details: string;
@@ -25,6 +26,15 @@ export interface CartItem {
     sheets: number;
     extraSheets: number;
     includesBox: boolean;
+  };
+  /** Fotolibro del editor simple (SimpleAlbumEditor). El diseño está en project.album. */
+  fotolibroConfig?: {
+    sizeId: string;
+    coverType: 'blanda' | 'dura';
+    finish: 'envolvente' | 'foto-tapa-cuero';
+    laminate: 'brillo' | 'mate';
+    sheets: number;
+    giftBox: boolean;
   };
   printConfig?: {
     sizeId: string;
@@ -97,14 +107,14 @@ export const CartCheckoutModal: React.FC<CartCheckoutModalProps> = ({
       format: ci.project?.formatId || 'Formato Fine Art',
       cover: ci.project?.coverMaterialId || 'Lino Seleccionado',
       foil: ci.project?.foilColor || 'Oro Champagne',
-      pages: ci.project ? ci.project.spreads.length * 2 : 20,
+      pages: ci.fotolibroConfig ? ci.fotolibroConfig.sheets * 2 : ci.project ? ci.project.spreads.length * 2 : 20,
       price: ci.price,
       previewUrl: ci.project?.photos[0]?.url || ci.printConfig?.thumbnailUrl || ci.thumbnailUrl || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80',
       // Whether this specific item actually includes the gift box — was
       // hardcoded to `true` before, which both misreported "sin cofre"
       // custom albums on the invoice and made the server's price floor
       // reject legitimate orders that opted out of the box.
-      hasGiftBox: ci.type === 'custom-album' ? !!ci.project?.giftBoxIncluded : ci.type === 'photobook-order',
+      hasGiftBox: ci.type === 'fotolibro' ? !!ci.fotolibroConfig?.giftBox : ci.type === 'custom-album' ? !!ci.project?.giftBoxIncluded : ci.type === 'photobook-order',
       // Storage path of the customer's original photo (fine-art-print
       // orders only), so the lab can retrieve the full-resolution file.
       photoStoragePath: ci.printConfig?.storagePath,
@@ -116,6 +126,14 @@ export const CartCheckoutModal: React.FC<CartCheckoutModalProps> = ({
       // 'photobook-order' (ProductCatalog.tsx — "Gran Formato")
       photobookFormatId: ci.photobookConfig?.formatId,
       extraSheets: ci.photobookConfig?.extraSheets,
+      // 'fotolibro' (SimpleAlbumEditor.tsx)
+      fotolibroSizeId: ci.fotolibroConfig?.sizeId,
+      fotolibroCoverType: ci.fotolibroConfig?.coverType,
+      fotolibroFinish: ci.fotolibroConfig?.finish,
+      fotolibroSheets: ci.fotolibroConfig?.sheets,
+      fotolibroGiftBox: ci.fotolibroConfig?.giftBox,
+      // Diagramación completa + rutas de las fotos originales, para el laboratorio.
+      albumLayout: ci.type === 'fotolibro' && ci.project ? buildAlbumLabLayout(ci.project) : undefined,
       // 'fine-art-print' (ProductCatalog.tsx)
       printSizeId: ci.printConfig?.sizeId,
       printPaperId: ci.printConfig?.paperId,
@@ -215,12 +233,12 @@ export const CartCheckoutModal: React.FC<CartCheckoutModalProps> = ({
         format: ci.project?.formatId || 'Formato Fine Art',
         cover: ci.project?.coverMaterialId || 'Lino Seleccionado',
         foil: ci.project?.foilColor || 'Oro Champagne',
-        pages: ci.project ? ci.project.spreads.length * 2 : 20,
+        pages: ci.fotolibroConfig ? ci.fotolibroConfig.sheets * 2 : ci.project ? ci.project.spreads.length * 2 : 20,
         price: ci.price,
         previewUrl: ci.project?.photos[0]?.url || ci.printConfig?.thumbnailUrl || ci.thumbnailUrl || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80',
         // See buildItemsPayload() above — reflects whether this item
         // actually includes the gift box, instead of always `true`.
-        hasGiftBox: ci.type === 'custom-album' ? !!ci.project?.giftBoxIncluded : ci.type === 'photobook-order',
+        hasGiftBox: ci.type === 'fotolibro' ? !!ci.fotolibroConfig?.giftBox : ci.type === 'custom-album' ? !!ci.project?.giftBoxIncluded : ci.type === 'photobook-order',
         photoStoragePath: ci.printConfig?.storagePath,
       })),
       timeline: [
@@ -278,6 +296,9 @@ export const CartCheckoutModal: React.FC<CartCheckoutModalProps> = ({
       paper_type: cartItems[0]?.project?.paperType || 'Fuji Lustre HD',
       total_price: total,
       status: 'confirmado',
+      // Guardamos los ítems (con la diagramación de los fotolibros) para que
+      // el laboratorio tenga todo lo necesario también en pagos por transferencia.
+      items_json: buildItemsPayload() as any,
     }).catch((err) => {
       console.warn('Error no bloqueante al sincronizar pedido con Supabase:', err);
     });
@@ -361,7 +382,9 @@ export const CartCheckoutModal: React.FC<CartCheckoutModalProps> = ({
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-bold uppercase tracking-wider text-[#8C6D37] bg-[#EFE9DE] px-2 py-0.5 rounded">
-                            {item.type === 'custom-album' 
+                            {item.type === 'fotolibro'
+                              ? 'Fotolibro'
+                              : item.type === 'custom-album' 
                               ? 'Fotolibro a Medida' 
                               : item.type === 'photobook-order'
                               ? 'Fotolibro Grandes Formatos'

@@ -168,6 +168,35 @@ export const AdminWorkshopModal: React.FC<AdminWorkshopModalProps> = ({
   const handleDownloadZip = async (order: TrackedOrder) => {
     setIsDownloadingZip(order.id);
     setZipFallbackInfo(null);
+    // Fotolibros del editor simple: se generan los archivos de impresión
+    // (pliegos a 300 DPI con sangrado) a partir de la diagramación guardada.
+    const albumItems = (order.items as any[]).filter((it) => it?.albumLayout);
+    if (albumItems.length > 0) {
+      try {
+        const { generateAlbumPrintZip } = await import('../lib/albumPrintExport');
+        const missingAll: string[] = [];
+        for (let i = 0; i < albumItems.length; i++) {
+          const code = albumItems.length > 1 ? `${order.orderNumber}-${i + 1}` : order.orderNumber;
+          const result = await generateAlbumPrintZip(code, albumItems[i].albumLayout);
+          if (!result.ok) {
+            setZipFallbackInfo({ orderId: order.id, message: result.error || 'No se pudieron generar los archivos de impresión.' });
+          }
+          missingAll.push(...result.missingPhotos);
+        }
+        if (missingAll.length > 0) {
+          setZipFallbackInfo({
+            orderId: order.id,
+            message: `Se generaron los archivos, pero faltan ${missingAll.length} foto(s) originales (quedaron en blanco). Detalle en especificaciones.txt.`,
+          });
+        }
+      } catch (err) {
+        console.error('Error generando archivos de impresión', err);
+        setZipFallbackInfo({ orderId: order.id, message: 'No se pudieron generar los archivos de impresión. Intentá de nuevo.' });
+      } finally {
+        setIsDownloadingZip(null);
+      }
+      return;
+    }
     try {
       const result = await generateAndDownloadProductionZip(order);
       if (!result.ok && result.reason === 'no_photos') {
