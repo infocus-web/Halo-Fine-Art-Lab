@@ -23,7 +23,13 @@ export interface AlbumLabLayout {
   giftBox: boolean;
   sheets: number;
   cover: AlbumDesign['cover'];
-  spreads: { cells: AlbumDesign['spreads'][number]['cells'] }[];
+  spreads: {
+    cells: AlbumDesign['spreads'][number]['cells'];
+    /** Color de fondo de la doble página (blanco si falta). */
+    background?: string;
+    /** Textos sobre la página. */
+    texts?: AlbumDesign['spreads'][number]['texts'];
+  }[];
   photos: AlbumLabPhoto[];
 }
 
@@ -42,7 +48,7 @@ export function buildAlbumLabLayout(project: PhotobookProject): AlbumLabLayout |
     giftBox: album.coverType === 'dura' ? true : album.giftBox,
     sheets: album.spreads.length,
     cover: album.cover,
-    spreads: album.spreads.map((s) => ({ cells: s.cells })),
+    spreads: album.spreads.map((s) => ({ cells: s.cells, background: s.background, texts: s.texts?.filter((t) => t.text.trim()) })),
     photos: project.photos
       .filter((p) => used.has(p.id))
       .map((p) => ({ id: p.id, name: p.name, storagePath: p.storagePath, width: p.width, height: p.height })),
