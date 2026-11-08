@@ -92,9 +92,9 @@ export const PHOTOBOOK_GRANDES_FORMATOS: PhotobookProduct = {
   id: 'fotolibro-tapa-dura-grandes-formatos',
   category: 'fotolibro',
   name: 'Fotolibro de Autor en Tapa Dura',
-  collection: 'Colección Grandes Formatos',
+  collection: 'Fotolibros grandes',
   subtitle: 'Presupuesto Oficial · Encuadernación Artesanal Cosida en Tapa Dura',
-  description: 'Impresión química en papel fotográfico premium Layflat 180° con alma rígida. Cada ejemplar incluye caja contenedora personalizada a juego sin cargo y maquetado editorial asistido.',
+  description: 'Impreso en papel fotográfico, con hojas rígidas que abren planas. Incluye caja de regalo.',
   includesBox: true,
   productionTime: '15 a 20 días hábiles desde la aprobación del diseño',
   depositPercent: 50,
@@ -155,14 +155,14 @@ export const PHOTOBOOK_GRANDES_FORMATOS: PhotobookProduct = {
   finishes: [
     {
       id: 'envolvente',
-      name: 'Envolvente (Foto Continua)',
-      description: 'La fotografía se extiende por la tapa, lomo y contratapa de forma panorámica e ininterrumpida con laminado mate aterciopelado soft-touch.',
+      name: 'Tapa envolvente',
+      description: 'Tu foto cubre toda la tapa, el lomo y la contratapa.',
       badge: 'Mismo Valor'
     },
     {
       id: 'foto-tapa-cuero',
-      name: 'Foto Tapa + Cuero',
-      description: 'Combina una ventana fotográfica central montada al ras con lomo y guarda trasera en cuero artisan italiano o lino puro.',
+      name: 'Tapa foto + cuero',
+      description: 'Tu foto en la tapa, con lomo y contratapa de cuero negro.',
       badge: 'Mismo Valor'
     }
   ]
