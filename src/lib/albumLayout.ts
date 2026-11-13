@@ -36,6 +36,24 @@ export interface AlbumCell {
   /** Encuadre: 0..1 (0.5 = centrado). */
   panX: number;
   panY: number;
+  /** Blanco y negro (se aplica igual en pantalla y en el archivo de impresión). */
+  bw?: boolean;
+}
+
+/** Texto libre sobre una doble página (título, fecha, una frase). */
+export interface SpreadText {
+  id: string;
+  text: string;
+  /** Esquina superior izquierda y ancho, en fracción de la doble página. */
+  x: number;
+  y: number;
+  w: number;
+  /** Tamaño de letra en fracción del ALTO de la página (0.04 = 4 %). */
+  size: number;
+  align: 'left' | 'center' | 'right';
+  color: string;
+  font: 'serif' | 'sans' | 'script';
+  italic?: boolean;
 }
 
 export interface AlbumSpread {
@@ -44,6 +62,14 @@ export interface AlbumSpread {
   /** Índice de la alternativa de diseño elegida (0 = la mejor). */
   variant: number;
   cells: AlbumCell[];
+  /** Color de fondo de la doble página (por defecto blanco). */
+  background?: string;
+  /** Hoja bloqueada: no se le agregan ni se le mueven fotos hasta destrabarla. */
+  locked?: boolean;
+  /** Textos sobre la página. */
+  texts?: SpreadText[];
+  /** Las celdas fueron ajustadas a mano (arrastrando una separación): no se rediagrama solo. */
+  custom?: boolean;
 }
 
 export interface AlbumCover {
@@ -66,6 +92,8 @@ export interface AlbumDesign {
   spreads: AlbumSpread[];
   /** Separación entre fotos y margen exterior (como los controles de SmartAlbums). */
   spacing?: SpacingOptions;
+  /** Fondo por defecto de las páginas nuevas (color CSS). */
+  background?: string;
 }
 
 export interface SpacingOptions {
@@ -73,9 +101,21 @@ export interface SpacingOptions {
   gutterMm: number;
   /** Margen blanco alrededor de cada página, en mm (0 = fotos a sangre). */
   marginMm: number;
+  /** Permitir diseños con fotos que cruzan el lomo (una foto a doble página, panorámicas). */
+  spanGutter?: boolean;
 }
 
-export const DEFAULT_SPACING: SpacingOptions = { gutterMm: GUTTER_MM, marginMm: 0 };
+export const DEFAULT_SPACING: SpacingOptions = { gutterMm: GUTTER_MM, marginMm: 0, spanGutter: true };
+
+/** Fondos de página que ofrece el editor (el primero es el de siempre). */
+export const PAGE_BACKGROUNDS: { id: string; name: string; color: string }[] = [
+  { id: 'blanco', name: 'Blanco', color: '#FFFFFF' },
+  { id: 'crema', name: 'Crema', color: '#F6F1E7' },
+  { id: 'gris', name: 'Gris claro', color: '#E6E6E8' },
+  { id: 'piedra', name: 'Piedra', color: '#8E8A84' },
+  { id: 'carbon', name: 'Carbón', color: '#2A2A2D' },
+  { id: 'negro', name: 'Negro', color: '#000000' },
+];
 
 export interface LayoutPhoto {
   id: string;
@@ -251,22 +291,44 @@ interface SpreadOption {
   score: number;
 }
 
+/** Cuántas alternativas de diseño se calculan por doble página (las que muestra el panel «Diseños»). */
+export const MAX_VARIANTS = 24;
+
 /** Alternativas de diseño para una doble página, ordenadas de mejor a peor. */
-function spreadOptions(photos: LayoutPhoto[], sizeId: string, spacing: SpacingOptions = DEFAULT_SPACING, limit = 14): SpreadOption[] {
+function spreadOptions(photos: LayoutPhoto[], sizeId: string, spacing: SpacingOptions = DEFAULT_SPACING, limit = MAX_VARIANTS): SpreadOption[] {
   const { w: pw, h: ph } = pageSizeMm(sizeId);
   const gap = Math.max(0, spacing.gutterMm);
   const margin = Math.max(0, Math.min(spacing.marginMm, Math.min(pw, ph) / 4));
   const n = photos.length;
   if (n === 0) return [];
+  const span = spacing.spanGutter !== false;
 
   const options: SpreadOption[] = [];
-  if (n === 1) {
+  if (n === 1 && span) {
     // Una sola foto: toda la doble página (layflat), o sola en una página.
     const a = photos[0].aspect;
     const crop = (w: number, h: number) => Math.abs(Math.log(w / h / a));
     const fw = pw * 2 - margin * 2;
     const fh = ph - margin * 2;
     options.push({ rects: [{ x: margin, y: margin, w: fw, h: fh }], score: crop(fw, fh) * 0.6 });
+  }
+  if (n >= 2 && n <= MAX_PHOTOS_PER_PAGE && span) {
+    // La doble página como una sola hoja: alguna foto (idealmente panorámica) cruza el lomo.
+    for (const c of bestPageLayouts(photos, pw * 2, ph, gap, 6, margin)) {
+      let penalty = 0;
+      let crosses = 0;
+      c.rects.forEach((r, i) => {
+        if (r.x < pw - 0.5 && r.x + r.w > pw + 0.5) {
+          crosses++;
+          const a = r.w / r.h;
+          // Cruzar el lomo con una foto vertical o con una cara en el medio queda feo: se castiga.
+          penalty += a >= 1.6 ? 0.25 : a >= 1.2 ? 0.8 : 1.6;
+          if (Math.abs(r.x + r.w / 2 - pw) < r.w * 0.1 && photos[i].aspect < 1.4) penalty += 0.5;
+        }
+      });
+      if (!crosses) continue; // sin cruce, es igual a repartir por página
+      options.push({ rects: c.rects, score: c.score * 0.9 + penalty });
+    }
   }
   // Todas las fotos en una sola página (la otra queda en blanco), o repartidas.
   for (let k = 0; k <= n; k++) {
@@ -294,6 +356,118 @@ export function countSpreadVariants(photos: LayoutPhoto[], sizeId: string, spaci
   return spreadOptions(photos, sizeId, spacing).length;
 }
 
+/** Rectángulo en fracción de la doble página (0..1). */
+export interface FracRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Todas las alternativas de diseño de una doble página, como rectángulos en fracción,
+ * para dibujar el panel «Diseños» (miniaturas de alambre) sin tocar el encuadre.
+ */
+export function spreadVariants(photos: LayoutPhoto[], sizeId: string, spacing?: SpacingOptions): FracRect[][] {
+  const { w: pw, h: ph } = pageSizeMm(sizeId);
+  const spreadW = pw * 2;
+  return spreadOptions(photos, sizeId, spacing).map((o) => o.rects.map((r) => ({ x: r.x / spreadW, y: r.y / ph, w: r.w / spreadW, h: r.h / ph })));
+}
+
+// ---------------------------------------------------------------------------
+// Separaciones arrastrables (como en SmartAlbums: se agranda una foto y se achica la de al lado)
+// ---------------------------------------------------------------------------
+
+export interface Divider {
+  dir: 'v' | 'h';
+  /** Posición de la separación (su inicio) en fracción de la doble página. */
+  pos: number;
+  /** Ancho de la separación en fracción. */
+  gap: number;
+  /** Tramo que ocupa (en el otro eje), en fracción. */
+  from: number;
+  to: number;
+  /** Fotos de un lado y del otro. */
+  before: string[];
+  after: string[];
+}
+
+const near = (a: number, b: number, eps = 0.003) => Math.abs(a - b) < eps;
+
+/** Encuentra las separaciones entre fotos vecinas de una doble página. */
+export function findDividers(cells: AlbumCell[]): Divider[] {
+  const out: Divider[] = [];
+  for (const dir of ['v', 'h'] as const) {
+    const end = (c: AlbumCell) => (dir === 'v' ? c.x + c.w : c.y + c.h);
+    const start = (c: AlbumCell) => (dir === 'v' ? c.x : c.y);
+    const lo = (c: AlbumCell) => (dir === 'v' ? c.y : c.x);
+    const hi = (c: AlbumCell) => (dir === 'v' ? c.y + c.h : c.x + c.w);
+    const ends = [...new Set(cells.map((c) => Math.round(end(c) * 1000) / 1000))];
+    for (const e of ends) {
+      const before = cells.filter((c) => near(end(c), e));
+      const beforeSet = new Set(before);
+      // La vecina empieza justo después de la separación (misma distancia para todas; puede ser 0)
+      const afterAll = cells.filter((c) => !beforeSet.has(c) && start(c) >= e - 0.0005 && start(c) < e + 0.08);
+      if (!before.length || !afterAll.length) continue;
+      const gap = Math.max(0, Math.min(...afterAll.map((c) => start(c))) - e);
+      // El lomo no es una separación: cada página se diagrama por su cuenta
+      if (dir === 'v' && Math.abs(e + gap / 2 - 0.5) < 0.004) continue;
+      const after = afterAll.filter((c) => near(start(c), e + gap));
+      // Agrupa por tramos conectados (una separación puede estar partida en varias)
+      const items = [...before.map((c) => ({ c, side: 'b' as const })), ...after.map((c) => ({ c, side: 'a' as const }))].sort((p, q) => lo(p.c) - lo(q.c));
+      let group: typeof items = [];
+      let groupEnd = -1;
+      const flush = () => {
+        const b = group.filter((g) => g.side === 'b').map((g) => g.c);
+        const a = group.filter((g) => g.side === 'a').map((g) => g.c);
+        if (b.length && a.length) {
+          const touching = a.some((ac) => b.some((bc) => lo(ac) < hi(bc) - 0.001 && hi(ac) > lo(bc) + 0.001));
+          if (touching)
+            out.push({
+              dir,
+              pos: e,
+              gap,
+              from: Math.min(...group.map((g) => lo(g.c))),
+              to: Math.max(...group.map((g) => hi(g.c))),
+              before: b.map((c) => c.photoId),
+              after: a.map((c) => c.photoId),
+            });
+        }
+        group = [];
+      };
+      for (const it of items) {
+        if (group.length && lo(it.c) > groupEnd + 0.002) flush();
+        group.push(it);
+        groupEnd = Math.max(groupEnd, hi(it.c));
+      }
+      flush();
+    }
+  }
+  return out;
+}
+
+/** Mueve una separación `delta` (fracción de la doble página). Las fotos de un lado crecen y las del otro se achican. */
+export function moveDivider(cells: AlbumCell[], d: Divider, delta: number, minSize = 0.04): AlbumCell[] {
+  const before = cells.filter((c) => d.before.includes(c.photoId));
+  const after = cells.filter((c) => d.after.includes(c.photoId));
+  const sizeOf = (c: AlbumCell) => (d.dir === 'v' ? c.w : c.h);
+  const maxShrinkAfter = Math.min(...after.map((c) => sizeOf(c) - minSize));
+  const maxShrinkBefore = Math.min(...before.map((c) => sizeOf(c) - minSize));
+  const dd = Math.max(-maxShrinkBefore, Math.min(maxShrinkAfter, delta));
+  if (!isFinite(dd) || Math.abs(dd) < 1e-5) return cells;
+  return cells.map((c) => {
+    if (d.before.includes(c.photoId)) return d.dir === 'v' ? { ...c, w: c.w + dd } : { ...c, h: c.h + dd };
+    if (d.after.includes(c.photoId)) return d.dir === 'v' ? { ...c, x: c.x + dd, w: c.w - dd } : { ...c, y: c.y + dd, h: c.h - dd };
+    return c;
+  });
+}
+
+let textCounter = 0;
+export function newTextId(): string {
+  textCounter++;
+  return `tx-${Date.now().toString(36)}-${textCounter}`;
+}
+
 /** Calcula las celdas de una doble página para la alternativa `variant`. */
 export function layoutSpread(photos: LayoutPhoto[], sizeId: string, variant = 0, previous?: AlbumCell[], spacing?: SpacingOptions): AlbumCell[] {
   const opts = spreadOptions(photos, sizeId, spacing);
@@ -309,10 +483,11 @@ export function layoutSpread(photos: LayoutPhoto[], sizeId: string, variant = 0,
       y: r.y / ph,
       w: r.w / spreadW,
       h: r.h / ph,
-      // Conservamos el encuadre que el cliente ya ajustó.
+      // Conservamos el encuadre y el blanco y negro que el cliente ya ajustó.
       zoom: prev?.zoom ?? 1,
       panX: prev?.panX ?? 0.5,
       panY: prev?.panY ?? 0.5,
+      ...(prev?.bw ? { bw: true } : {}),
     };
   });
 }

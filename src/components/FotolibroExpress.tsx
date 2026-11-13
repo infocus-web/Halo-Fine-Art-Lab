@@ -9,22 +9,28 @@
 // principal por pantalla. El diseño automático usa src/lib/albumLayout.ts y
 // el pedido viaja igual que el del editor anterior (project.album).
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, ImagePlus, Loader2, Package, Shuffle, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Crop, ImagePlus, Loader2, Minus, Move, Package, Plus, Replace, Shuffle, SlidersHorizontal, Sparkles, Trash2, X, ZoomIn } from 'lucide-react';
+
+// El editor completo (interfaz tipo SmartAlbums) se carga solo si el cliente lo pide.
+const SimpleAlbumEditor = lazy(() => import('./SimpleAlbumEditor').then((m) => ({ default: m.SimpleAlbumEditor })));
 import { PhotoAsset, PhotobookProject } from '../types';
 import {
   FOTOLIBRO_PRESETS,
   FotolibroPreset,
   FotolibroLaminate,
+  MAX_PHOTOS_PER_PAGE,
   getFotolibroSize,
   minSheetsFor,
 } from '../data/fotolibroCatalog';
 import {
+  AlbumCell,
   AlbumDesign,
   AlbumSpread,
   DEFAULT_SPACING,
   LayoutPhoto,
+  SpacingOptions,
   buildSpreads,
   layoutSpread,
   pageSizeMm,
@@ -58,6 +64,12 @@ const LINE = '#E2D9CA';
 const BLUE = '#8C6D37'; // dorado Halo (acentos)
 const CTA = '#1F1C18'; // botón principal
 const COVER = -1;
+// Tipografías de los textos del editor completo (misma lista que SimpleAlbumEditor y albumPrintExport)
+const TEXT_FONTS = {
+  serif: '"Cormorant Garamond", Georgia, serif',
+  sans: '"Plus Jakarta Sans", Arial, sans-serif',
+  script: '"Great Vibes", cursive',
+} as const;
 
 // ---------------------------------------------------------------------------
 
@@ -172,7 +184,15 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
   const [step, setStep] = useState<Step>(resume ? 'libro' : 'elegir');
   const [current, setCurrent] = useState(COVER);
   const [selected, setSelected] = useState<string | null>(null);
-  const [coverPicker, setCoverPicker] = useState(false);
+  /** Selector de fotos: para la tapa, para reemplazar una foto o para sumar fotos a una hoja. */
+  const [picker, setPicker] = useState<null | { kind: 'cover' } | { kind: 'replace'; spreadIndex: number; photoId: string } | { kind: 'add'; spreadIndex: number }>(null);
+  const [pickSel, setPickSel] = useState<string[]>([]);
+  /** Herramienta activa sobre la foto elegida. */
+  const [tool, setTool] = useState<null | 'encuadrar' | 'mover'>(null);
+  const [showMargins, setShowMargins] = useState(false);
+  const dragId = useRef<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [advanced, setAdvanced] = useState(false);
   const [processing, setProcessing] = useState<{ done: number; total: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -325,6 +345,10 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
   // -------------------------------------------------------------------------
 
   const otherDesign = (spreadIndex: number) => {
+    if (design.spreads[spreadIndex]?.locked) {
+      setToast('Esta hoja está bloqueada desde el editor completo');
+      return;
+    }
     setDesign((d) => {
       const spreads = d.spreads.map((sp, i) => {
         if (i !== spreadIndex) return sp;
@@ -340,6 +364,10 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
   const removeFromSpread = (spreadIndex: number, photoId: string) => {
     const sp = design.spreads[spreadIndex];
     if (!sp) return;
+    if (sp.locked) {
+      setToast('Esta hoja está bloqueada desde el editor completo');
+      return;
+    }
     if (sp.photoIds.length <= 1) {
       setToast('Cada página necesita al menos una foto');
       return;
@@ -353,6 +381,121 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
       }),
     }));
     setSelected(null);
+  };
+
+  /** Rediagrama una hoja con sus fotos actuales (conserva encuadres). */
+  const relayoutSpread = (s: AlbumSpread, d: AlbumDesign, variant = 0): AlbumSpread => {
+    const lp = toLayout(s.photoIds);
+    return { ...s, photoIds: lp.map((p) => p.id), variant, cells: layoutSpread(lp, d.sizeId, variant, s.cells, d.spacing), custom: false };
+  };
+
+  /** Pone `newId` donde estaba `targetId`. Si la nueva ya estaba en otra hoja, se intercambian. */
+  const replaceInSpread = (spreadIndex: number, targetId: string, newId: string) => {
+    if (targetId === newId) return;
+    setDesign((d) => {
+      const spreads = d.spreads.map((s) => ({ ...s, photoIds: [...s.photoIds], cells: s.cells.map((c) => ({ ...c })) }));
+      const t = spreads[spreadIndex];
+      if (!t || t.locked) return d;
+      const pos = t.photoIds.indexOf(targetId);
+      if (pos < 0) return d;
+      const si = spreads.findIndex((s) => s.photoIds.includes(newId));
+      if (si >= 0 && spreads[si].locked) return d;
+      if (si >= 0) {
+        const sp2 = spreads[si];
+        const p2 = sp2.photoIds.indexOf(newId);
+        sp2.photoIds[p2] = targetId;
+        const c2 = sp2.cells.find((c) => c.photoId === newId);
+        if (c2) Object.assign(c2, { photoId: targetId, zoom: 1, panX: 0.5, panY: 0.5 });
+      }
+      t.photoIds[pos] = newId;
+      const c1 = t.cells.find((c) => c.photoId === targetId);
+      if (c1) Object.assign(c1, { photoId: newId, zoom: 1, panX: 0.5, panY: 0.5 });
+      return { ...d, spreads };
+    });
+    setSelected(null);
+    setTool(null);
+  };
+
+  /** Intercambia dos fotos de la misma hoja (cada una pasa al lugar de la otra). */
+  const swapInSpread = (spreadIndex: number, a: string, b: string) => {
+    if (a === b) return;
+    setDesign((d) => ({
+      ...d,
+      spreads: d.spreads.map((s, i) => {
+        if (i !== spreadIndex || s.locked) return s;
+        const ids = s.photoIds.map((id) => (id === a ? b : id === b ? a : id));
+        const cells = s.cells.map((c) => (c.photoId === a ? { ...c, photoId: b, zoom: 1, panX: 0.5, panY: 0.5 } : c.photoId === b ? { ...c, photoId: a, zoom: 1, panX: 0.5, panY: 0.5 } : c));
+        return { ...s, photoIds: ids, cells };
+      }),
+    }));
+    setSelected(null);
+    setTool(null);
+  };
+
+  /** Suma fotos a una hoja (si estaban en otra, se mueven). */
+  const addToSpread = (spreadIndex: number, ids: string[]) => {
+    const target = design.spreads[spreadIndex];
+    if (!target) return;
+    if (target.locked) return setToast('Esta hoja está bloqueada desde el editor completo');
+    const room = MAX_PHOTOS_PER_PAGE * 2 - target.photoIds.length;
+    const take = ids.filter((id) => !target.photoIds.includes(id)).slice(0, Math.max(0, room));
+    if (!take.length) return setToast(`Una hoja admite hasta ${MAX_PHOTOS_PER_PAGE * 2} fotos`);
+    const set = new Set(take);
+    setDesign((d) => ({
+      ...d,
+      spreads: d.spreads.map((s, i) => {
+        if (i === spreadIndex) return relayoutSpread({ ...s, photoIds: [...s.photoIds, ...take] }, d, 0);
+        if (!s.locked && s.photoIds.some((id) => set.has(id))) return relayoutSpread({ ...s, photoIds: s.photoIds.filter((id) => !set.has(id)) }, d, 0);
+        return s;
+      }),
+    }));
+    setSelected(null);
+  };
+
+  /** Una foto más en esta hoja: la siguiente que no está en el libro. */
+  const addNextUnused = (spreadIndex: number) => {
+    const next = sortPhotos(photos.filter((p) => !usedIds.has(p.id)))[0];
+    if (!next) {
+      setPicker({ kind: 'add', spreadIndex });
+      setPickSel([]);
+      return;
+    }
+    addToSpread(spreadIndex, [next.id]);
+  };
+
+  const updateCell = (spreadIndex: number, photoId: string, patch: Partial<AlbumCell>) =>
+    setDesign((d) => ({
+      ...d,
+      spreads: d.spreads.map((s, i) => (i === spreadIndex ? { ...s, cells: s.cells.map((c) => (c.photoId === photoId ? { ...c, ...patch } : c)) } : s)),
+    }));
+
+  /** Separación entre fotos y margen de la hoja, para todo el libro. */
+  const setSpacing = (patch: Partial<SpacingOptions>) =>
+    setDesign((d) => {
+      const nd = { ...d, spacing: { ...(d.spacing || DEFAULT_SPACING), ...patch } };
+      return { ...nd, spreads: nd.spreads.map((s) => (s.locked ? s : relayoutSpread(s, nd, s.variant))) };
+    });
+
+  /** Vuelve a armar todo el libro con todas las fotos, en orden. */
+  const rebuildAll = () => {
+    if (!window.confirm('¿Rearmar todo el libro automáticamente? Se pierden los cambios que hiciste en las hojas.')) return;
+    setDesign((d) => autoBuild(photos, d));
+    setSelected(null);
+    setTool(null);
+    setCurrent(0);
+  };
+
+  // Arrastrar una foto sobre otra la intercambia; sobre una miniatura de hoja, la pasa a esa hoja.
+  const DRAG = 'application/x-halo-photo';
+  const onCellDragStart = (e: React.DragEvent, photoId: string) => {
+    dragId.current = photoId;
+    e.dataTransfer.setData(DRAG, photoId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const readDragId = (e: React.DragEvent) => e.dataTransfer.getData(DRAG) || dragId.current;
+  const endDrag = () => {
+    dragId.current = null;
+    setDropTarget(null);
   };
 
   // -------------------------------------------------------------------------
@@ -404,8 +547,15 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
     if (step !== 'libro') return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      if (picker || advanced) return;
       if (e.key === 'ArrowRight') go(1);
       if (e.key === 'ArrowLeft') go(-1);
+      if (e.key === 'Escape') {
+        setSelected(null);
+        setTool(null);
+        setShowMargins(false);
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selected && current !== COVER) removeFromSpread(current, selected);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -468,43 +618,164 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
     );
   };
 
+  /** Encuadrar: arrastrar mueve la foto dentro de su marco (misma cuenta que el archivo de impresión). */
+  const startCrop = (e: React.PointerEvent, spreadIndex: number, cell: AlbumCell, cellAspect: number) => {
+    const el = e.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    const pl = placeImage(cellAspect, photoAspect(photoById.get(cell.photoId)), cell.zoom, cell.panX, cell.panY);
+    const sx = e.clientX;
+    const sy = e.clientY;
+    el.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const spanX = 1 - pl.width;
+      const spanY = 1 - pl.height;
+      updateCell(spreadIndex, cell.photoId, {
+        panX: spanX < -1e-4 ? Math.min(1, Math.max(0, cell.panX + (ev.clientX - sx) / rect.width / spanX)) : 0.5,
+        panY: spanY < -1e-4 ? Math.min(1, Math.max(0, cell.panY + (ev.clientY - sy) / rect.height / spanY)) : 0.5,
+      });
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
+
+  // Fondo, blanco y negro y textos vienen del editor completo: acá se muestran tal cual (sin editarlos).
   const renderSpread = (sp: AlbumSpread, spreadIndex: number, interactive: boolean, thumb = false) => (
-    <div className="relative w-full h-full bg-white overflow-hidden" style={{ borderRadius: thumb ? 2 : 4 }}>
+    <div
+      className="relative w-full h-full overflow-hidden"
+      style={{ borderRadius: thumb ? 2 : 4, background: sp.background || design.background || '#FFFFFF', containerType: 'size' }}
+      onDragOver={interactive ? (e) => dragId.current && e.preventDefault() : undefined}
+      onDrop={
+        interactive
+          ? (e) => {
+              e.preventDefault();
+              const id = readDragId(e);
+              endDrag();
+              if (id && !sp.photoIds.includes(id)) addToSpread(spreadIndex, [id]);
+            }
+          : undefined
+      }
+    >
       {sp.cells.map((c) => {
         const frameAspect = (c.w * spreadAspect) / c.h;
         const isSel = interactive && selected === c.photoId;
+        const cropping = isSel && tool === 'encuadrar';
+        const isDrop = interactive && dropTarget === c.photoId;
         return (
           <div
             key={c.photoId}
             className="absolute overflow-hidden"
-            onClick={interactive ? (e) => (e.stopPropagation(), setSelected(isSel ? null : c.photoId)) : undefined}
+            draggable={interactive && !cropping && !sp.locked}
+            onDragStart={interactive ? (e) => onCellDragStart(e, c.photoId) : undefined}
+            onDragEnd={interactive ? endDrag : undefined}
+            onDragOver={
+              interactive
+                ? (e) => {
+                    if (!dragId.current || dragId.current === c.photoId) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (dropTarget !== c.photoId) setDropTarget(c.photoId);
+                  }
+                : undefined
+            }
+            onDragLeave={interactive ? () => dropTarget === c.photoId && setDropTarget(null) : undefined}
+            onDrop={
+              interactive
+                ? (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const id = readDragId(e);
+                    endDrag();
+                    if (!id || id === c.photoId) return;
+                    if (sp.photoIds.includes(id)) swapInSpread(spreadIndex, c.photoId, id);
+                    else replaceInSpread(spreadIndex, c.photoId, id);
+                  }
+                : undefined
+            }
+            onClick={
+              interactive
+                ? (e) => {
+                    e.stopPropagation();
+                    if (tool === 'mover' && selected && selected !== c.photoId) {
+                      swapInSpread(spreadIndex, selected, c.photoId);
+                      return;
+                    }
+                    if (isSel) return;
+                    setTool(null);
+                    setSelected(c.photoId);
+                  }
+                : undefined
+            }
+            onDoubleClick={
+              interactive && !sp.locked
+                ? () => {
+                    setSelected(c.photoId);
+                    setTool('encuadrar');
+                  }
+                : undefined
+            }
+            onPointerDown={cropping ? (e) => startCrop(e, spreadIndex, c, frameAspect) : undefined}
+            onWheel={cropping ? (e) => updateCell(spreadIndex, c.photoId, { zoom: Math.min(3, Math.max(1, c.zoom - e.deltaY * 0.0015)) }) : undefined}
             style={{
               left: `${c.x * 100}%`,
               top: `${c.y * 100}%`,
               width: `${c.w * 100}%`,
               height: `${c.h * 100}%`,
-              cursor: interactive ? 'pointer' : 'default',
-              outline: isSel ? `3px solid ${BLUE}` : 'none',
+              cursor: interactive ? (cropping ? 'move' : tool === 'mover' ? 'copy' : 'pointer') : 'default',
+              outline: isSel ? `3px solid ${BLUE}` : isDrop ? `3px dashed ${BLUE}` : 'none',
               outlineOffset: -3,
+              filter: c.bw ? 'grayscale(1)' : undefined,
+              zIndex: isSel ? 2 : undefined,
             }}
           >
             <Img photo={photoById.get(c.photoId)} frameAspect={frameAspect} zoom={c.zoom} panX={c.panX} panY={c.panY} thumb={thumb} />
-            {isSel && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeFromSpread(spreadIndex, c.photoId);
-                }}
-                className="absolute top-2 right-2 h-9 px-3 rounded-full bg-white/95 text-[14px] font-medium inline-flex items-center gap-1.5 shadow-lg"
-                style={{ color: '#d70015' }}
-              >
-                <Trash2 className="w-4 h-4" /> Quitar
-              </button>
+            {isDrop && (
+              <div className="absolute inset-0 flex items-center justify-center text-[14px] font-medium text-white pointer-events-none" style={{ background: 'rgba(140,109,55,.45)' }}>
+                Soltá para intercambiar
+              </div>
+            )}
+            {cropping && (
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full px-3 py-1 text-[12px] text-white pointer-events-none whitespace-nowrap" style={{ background: 'rgba(0,0,0,.55)' }}>
+                Arrastrá para encuadrar · rueda para acercar
+              </div>
             )}
           </div>
         );
       })}
+      {interactive && sp.photoIds.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center text-[16px] text-center px-6" style={{ color: GREY }}>
+          Esta hoja está vacía. Tocá «+ foto» para sumarle fotos.
+        </div>
+      )}
+      {(sp.texts || []).map((t) => (
+        <div
+          key={t.id}
+          className="absolute pointer-events-none"
+          style={{
+            left: `${t.x * 100}%`,
+            top: `${t.y * 100}%`,
+            width: `${t.w * 100}%`,
+            fontFamily: TEXT_FONTS[t.font],
+            fontSize: `${t.size * 100}cqh`,
+            lineHeight: 1.25,
+            textAlign: t.align,
+            color: t.color,
+            fontStyle: t.italic ? 'italic' : undefined,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {t.text}
+        </div>
+      ))}
+      {sp.locked && interactive && (
+        <span className="absolute top-2 left-2 rounded-full px-2.5 py-1 text-[12px] font-medium" style={{ background: 'rgba(0,0,0,.55)', color: '#fff' }}>
+          Hoja bloqueada
+        </span>
+      )}
       {/* pliegue central */}
       <div
         className="absolute top-0 bottom-0 pointer-events-none"
@@ -668,15 +939,35 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
   const onCover = current === COVER;
   const spread = onCover ? undefined : design.spreads[current];
   const pageNumber = pages.indexOf(current);
+  const selectedCell = selected && spread ? spread.cells.find((c) => c.photoId === selected) : undefined;
+  /** En qué hoja está cada foto (para el selector). */
+  const pageOf = useMemo(() => {
+    const m = new Map<string, number>();
+    design.spreads.forEach((s, i) => s.photoIds.forEach((id) => m.set(id, i)));
+    return m;
+  }, [design.spreads]);
+
+  /** Botón redondo de herramienta, grande y con ícono. */
+  const pill = (label: string, onClick: () => void, icon?: React.ReactNode, active = false, color?: string) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="h-10 px-4 rounded-full text-[15px] font-medium inline-flex items-center gap-2 transition-colors hover:bg-[#EAE2D3]"
+      style={{ background: active ? INK : SOFT, color: color || (active ? '#FDFCF9' : INK) }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
 
   const screenLibro = (
-    <div className="flex flex-col h-full" onClick={() => setSelected(null)}>
+    <div className="flex flex-col h-full" onClick={() => (setSelected(null), setTool(null))}>
       <div className="text-center pt-4 sm:pt-5 px-4">
         <h1 className="font-semibold leading-tight" style={{ fontFamily: SERIF, fontSize: 'clamp(28px,3.4vw,38px)', color: INK }}>
           Así queda tu libro
         </h1>
         <p className="mt-1.5 text-[17px]" style={{ color: GREY }}>
-          Pasá las páginas. Si querés, tocá una foto para quitarla.
+          Pasá las páginas. Tocá una foto para encuadrarla, cambiarla, moverla o quitarla. Arrastrá una foto sobre otra para intercambiarlas.
         </p>
       </div>
 
@@ -727,8 +1018,8 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
         </button>
       </div>
 
-      {/* una sola acción por página */}
-      <div className="h-12 flex items-center justify-center gap-3 px-5" onClick={(e) => e.stopPropagation()}>
+      {/* herramientas: pocas, grandes y claras; cambian según qué esté elegido */}
+      <div className="min-h-12 flex flex-wrap items-center justify-center gap-2 px-4 py-1" onClick={(e) => e.stopPropagation()}>
         {onCover ? (
           <>
             <input
@@ -738,26 +1029,115 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
               className="h-10 w-56 sm:w-72 rounded-full px-4 text-[15px] outline-none focus:ring-2"
               style={{ background: SOFT, color: INK }}
             />
+            {pill('Cambiar foto', () => setPicker({ kind: 'cover' }), <ImagePlus className="w-4 h-4" />)}
+          </>
+        ) : selected && spread && selectedCell ? (
+          tool === 'encuadrar' ? (
+            <>
+              <span className="text-[15px]" style={{ color: GREY }}>Arrastrá la foto para encuadrarla</span>
+              <label className="inline-flex items-center gap-2 text-[14px]" style={{ color: INK }}>
+                <ZoomIn className="w-4 h-4" />
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.01}
+                  value={selectedCell.zoom}
+                  onChange={(e) => updateCell(current, selected, { zoom: Number(e.target.value) })}
+                  className="w-32 sm:w-44"
+                  style={{ accentColor: BLUE }}
+                  aria-label="Zoom"
+                />
+              </label>
+              {pill('Centrar', () => updateCell(current, selected, { zoom: 1, panX: 0.5, panY: 0.5 }))}
+              {pill('Listo', () => setTool(null), <Check className="w-4 h-4" />, true)}
+            </>
+          ) : tool === 'mover' ? (
+            <>
+              <span className="text-[15px]" style={{ color: GREY }}>Tocá la foto con la que la querés intercambiar</span>
+              {pill('Cancelar', () => setTool(null))}
+            </>
+          ) : (
+            <>
+              {pill('Encuadrar', () => setTool('encuadrar'), <Crop className="w-4 h-4" />)}
+              {pill('Cambiar foto', () => (setPicker({ kind: 'replace', spreadIndex: current, photoId: selected }), setPickSel([])), <Replace className="w-4 h-4" />)}
+              {spread.photoIds.length > 1 && pill('Mover', () => setTool('mover'), <Move className="w-4 h-4" />)}
+              {pill('Quitar', () => removeFromSpread(current, selected), <Trash2 className="w-4 h-4" />, false, '#d70015')}
+              <button type="button" onClick={() => setSelected(null)} className="h-10 px-3 rounded-full text-[15px] font-medium" style={{ color: BLUE }}>
+                Listo
+              </button>
+            </>
+          )
+        ) : spread ? (
+          <>
+            {pill('Otro diseño', () => otherDesign(current), <Shuffle className="w-4 h-4" />)}
+            <span className="inline-flex items-center h-10 rounded-full px-1.5 gap-1" style={{ background: SOFT }} title="Cuántas fotos van en esta hoja">
+              <button
+                type="button"
+                onClick={() => spread.photoIds.length > 1 && removeFromSpread(current, spread.photoIds[spread.photoIds.length - 1])}
+                disabled={spread.photoIds.length <= 1 || !!spread.locked}
+                className="w-8 h-8 rounded-full inline-flex items-center justify-center disabled:opacity-30 hover:bg-[#EAE2D3]"
+                style={{ color: INK }}
+                aria-label="Una foto menos"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+              <span className="text-[15px] font-medium tabular-nums px-1" style={{ color: INK }}>
+                {spread.photoIds.length} {spread.photoIds.length === 1 ? 'foto' : 'fotos'}
+              </span>
+              <button
+                type="button"
+                onClick={() => addNextUnused(current)}
+                disabled={spread.photoIds.length >= MAX_PHOTOS_PER_PAGE * 2 || !!spread.locked}
+                className="w-8 h-8 rounded-full inline-flex items-center justify-center disabled:opacity-30 hover:bg-[#EAE2D3]"
+                style={{ color: INK }}
+                aria-label="Una foto más"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </span>
+            {pill('Márgenes', () => setShowMargins((v) => !v), <SlidersHorizontal className="w-4 h-4" />, showMargins)}
+            {pill('Rearmar todo', rebuildAll, <Sparkles className="w-4 h-4" />)}
             <button
               type="button"
-              onClick={() => setCoverPicker(true)}
-              className="h-10 px-4 rounded-full text-[15px] font-medium"
+              onClick={() => setAdvanced(true)}
+              className="h-10 px-3 rounded-full text-[15px] font-medium inline-flex items-center gap-2"
               style={{ color: BLUE }}
+              title="Editor completo: bandeja de fotos, todos los diseños, textos, fondos, blanco y negro"
             >
-              Cambiar foto
+              Editor completo
             </button>
           </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => otherDesign(current)}
-            className="h-10 px-5 rounded-full text-[15px] font-medium inline-flex items-center gap-2 hover:bg-[#EAE2D3] transition-colors"
-            style={{ background: SOFT, color: INK }}
-          >
-            <Shuffle className="w-4 h-4" /> Otro diseño
-          </button>
-        )}
+        ) : null}
       </div>
+
+      {/* márgenes y separación (para todo el libro) */}
+      <AnimatePresence>
+        {showMargins && !onCover && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            className="mx-auto mb-1 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 rounded-2xl px-5 py-3"
+            style={{ background: SOFT }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <label className="inline-flex items-center gap-3 text-[14px]" style={{ color: INK }}>
+              Separación
+              <input type="range" min={0} max={12} value={design.spacing?.gutterMm ?? DEFAULT_SPACING.gutterMm} onChange={(e) => setSpacing({ gutterMm: Number(e.target.value) })} className="w-28" style={{ accentColor: BLUE }} />
+              <span className="tabular-nums w-12" style={{ color: GREY }}>{design.spacing?.gutterMm ?? DEFAULT_SPACING.gutterMm} mm</span>
+            </label>
+            <label className="inline-flex items-center gap-3 text-[14px]" style={{ color: INK }}>
+              Margen
+              <input type="range" min={0} max={25} value={design.spacing?.marginMm ?? 0} onChange={(e) => setSpacing({ marginMm: Number(e.target.value) })} className="w-28" style={{ accentColor: BLUE }} />
+              <span className="tabular-nums w-12" style={{ color: GREY }}>{design.spacing?.marginMm ?? 0} mm</span>
+            </label>
+            <button type="button" onClick={() => setSpacing({ ...DEFAULT_SPACING })} className="text-[13px] underline" style={{ color: GREY }}>
+              Volver al estilo HALO
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* miniaturas */}
       <div className="px-4 sm:px-8 pt-3 pb-3 overflow-x-auto">
@@ -769,16 +1149,31 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
               <button
                 key={pg === COVER ? 'cover' : design.spreads[pg].id}
                 type="button"
-                onClick={(e) => (e.stopPropagation(), setSelected(null), setCurrent(pg))}
+                onClick={(e) => (e.stopPropagation(), setSelected(null), setTool(null), setCurrent(pg))}
                 className="flex flex-col items-center gap-1"
+                onDragOver={(e) => {
+                  if (!dragId.current) return;
+                  e.preventDefault();
+                  if (dropTarget !== `pg-${pg}`) setDropTarget(`pg-${pg}`);
+                }}
+                onDragLeave={() => dropTarget === `pg-${pg}` && setDropTarget(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const id = readDragId(e);
+                  endDrag();
+                  if (!id) return;
+                  if (pg === COVER) setDesign((d) => ({ ...d, cover: { ...d.cover, photoId: id, zoom: 1, panX: 0.5, panY: 0.5 } }));
+                  else addToSpread(pg, [id]);
+                }}
+                title={pg === COVER ? 'Soltá una foto acá para usarla de tapa' : 'Soltá una foto acá para pasarla a esta hoja'}
               >
                 <div
                   className="relative transition-all"
                   style={{
                     height: h,
                     width: h * (pg === COVER ? pageAspect : spreadAspect),
-                    outline: active ? `2px solid ${BLUE}` : `1px solid ${LINE}`,
-                    outlineOffset: active ? 2 : 0,
+                    outline: active ? `2px solid ${BLUE}` : dropTarget === `pg-${pg}` ? `2px dashed ${BLUE}` : `1px solid ${LINE}`,
+                    outlineOffset: active || dropTarget === `pg-${pg}` ? 2 : 0,
                     borderRadius: 2,
                     opacity: active ? 1 : 0.8,
                   }}
@@ -806,15 +1201,15 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
         </div>
       </div>
 
-      {/* elegir foto de tapa */}
+      {/* selector de fotos: tapa, cambiar una foto o sumar fotos a la hoja */}
       <AnimatePresence>
-        {coverPicker && (
+        {picker && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-10 bg-black/40 flex items-end sm:items-center justify-center"
-            onClick={() => setCoverPicker(false)}
+            onClick={() => setPicker(null)}
           >
             <motion.div
               initial={{ y: 30 }}
@@ -824,27 +1219,72 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-6 h-16 shrink-0">
-                <div className="text-[19px] font-semibold" style={{ color: INK }}>Elegí la foto de tapa</div>
-                <button type="button" onClick={() => setCoverPicker(false)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: SOFT }} aria-label="Cerrar">
+                <div>
+                  <div className="text-[19px] font-semibold" style={{ color: INK }}>
+                    {picker.kind === 'cover' ? 'Elegí la foto de tapa' : picker.kind === 'replace' ? 'Elegí la foto nueva' : 'Sumá fotos a esta hoja'}
+                  </div>
+                  <div className="text-[13px]" style={{ color: GREY }}>
+                    {picker.kind === 'add' ? 'Tocá las que quieras y después «Agregar».' : 'Las que ya están en el libro se ven más claras: si elegís una, se intercambian.'}
+                  </div>
+                </div>
+                <button type="button" onClick={() => setPicker(null)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: SOFT }} aria-label="Cerrar">
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <div className="overflow-y-auto px-6 pb-6 grid grid-cols-4 sm:grid-cols-5 gap-1.5">
-                {photos.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      setDesign((d) => ({ ...d, cover: { ...d.cover, photoId: p.id, zoom: 1, panX: 0.5, panY: 0.5 } }));
-                      setCoverPicker(false);
-                    }}
-                    className="aspect-square overflow-hidden rounded-md"
-                    style={{ outline: design.cover.photoId === p.id ? `3px solid ${BLUE}` : 'none', outlineOffset: -3 }}
-                  >
-                    <img src={thumbSrc(p)} alt="" className="w-full h-full object-cover" draggable={false} />
-                  </button>
-                ))}
+                {[...photos]
+                  .sort((a, b) => Number(usedIds.has(a.id)) - Number(usedIds.has(b.id)))
+                  .map((p) => {
+                    const where = pageOf.get(p.id);
+                    const used = picker.kind === 'cover' ? design.cover.photoId === p.id : where !== undefined;
+                    const chosen = picker.kind === 'add' && pickSel.includes(p.id);
+                    const isTarget = picker.kind === 'replace' && p.id === picker.photoId;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        disabled={isTarget}
+                        onClick={() => {
+                          if (picker.kind === 'cover') {
+                            setDesign((d) => ({ ...d, cover: { ...d.cover, photoId: p.id, zoom: 1, panX: 0.5, panY: 0.5 } }));
+                            setPicker(null);
+                          } else if (picker.kind === 'replace') {
+                            replaceInSpread(picker.spreadIndex, picker.photoId, p.id);
+                            setPicker(null);
+                          } else setPickSel((s) => (s.includes(p.id) ? s.filter((x) => x !== p.id) : [...s, p.id]));
+                        }}
+                        className="relative aspect-square overflow-hidden rounded-md disabled:opacity-40"
+                        style={{ outline: chosen || isTarget ? `3px solid ${BLUE}` : 'none', outlineOffset: -3 }}
+                      >
+                        <img src={thumbSrc(p)} alt="" className="w-full h-full object-cover" draggable={false} style={{ opacity: used && !isTarget ? 0.45 : 1 }} />
+                        {used && where !== undefined && !isTarget && (
+                          <span className="absolute bottom-1 left-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: 'rgba(0,0,0,.6)', color: '#fff' }}>
+                            pág. {where * 2 + 1}-{where * 2 + 2}
+                          </span>
+                        )}
+                        {chosen && (
+                          <span className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-white" style={{ background: BLUE }}>
+                            <Check className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        {isTarget && <span className="absolute inset-x-0 bottom-1 text-center text-[10px] font-medium text-white">actual</span>}
+                      </button>
+                    );
+                  })}
               </div>
+              {picker.kind === 'add' && (
+                <div className="shrink-0 px-6 py-4 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
+                  <span className="text-[14px]" style={{ color: GREY }}>{pickSel.length ? `${pickSel.length} elegidas` : 'Ninguna elegida'}</span>
+                  {primary(
+                    `Agregar${pickSel.length ? ` ${pickSel.length}` : ''}`,
+                    () => {
+                      addToSpread(picker.spreadIndex, pickSel);
+                      setPicker(null);
+                    },
+                    !pickSel.length
+                  )}
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -1008,6 +1448,25 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
         {step === 'libro' && screenLibro}
         {step === 'pedir' && screenPedir}
       </div>
+
+      {/* Editor completo (tipo SmartAlbums): se abre sobre este flujo y al volver trae los cambios */}
+      {advanced && (
+        <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: '#1C1C1E' }}><Loader2 className="w-7 h-7 animate-spin text-white/70" /></div>}>
+          <SimpleAlbumEditor
+            initialProject={buildProject()}
+            onClose={() => setAdvanced(false)}
+            onExit={(p) => {
+              if (p.album) setDesign(p.album);
+              setPhotos(p.photos);
+              setCurrent((c) => (c === COVER ? COVER : Math.min(c, Math.max(0, (p.album?.spreads.length || 1) - 1))));
+              setSelected(null);
+              setAdvanced(false);
+            }}
+            onAddToCart={onAddToCart}
+            onOpenAuth={onOpenAuth}
+          />
+        </Suspense>
+      )}
 
       <AnimatePresence>
         {toast && (

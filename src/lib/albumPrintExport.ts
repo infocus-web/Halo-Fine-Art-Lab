@@ -13,7 +13,7 @@
 import JSZip from 'jszip';
 import { getPhotoDownloadUrl } from './photoStorageService';
 import { BLEED_MM, PRINT_DPI, COVER_OPTIONS, getFotolibroSize } from '../data/fotolibroCatalog';
-import { pageSizeMm, placeImage } from './albumLayout';
+import { pageSizeMm, placeImage, type SpreadText } from './albumLayout';
 import type { AlbumLabLayout } from './albumOrder';
 
 const mmToPx = (mm: number) => Math.round((mm / 25.4) * PRINT_DPI);
@@ -45,14 +45,49 @@ function drawPhoto(
   rh: number,
   zoom: number,
   panX: number,
-  panY: number
+  panY: number,
+  bw = false
 ) {
   const place = placeImage(rw / rh, img.naturalWidth / img.naturalHeight, zoom, panX, panY);
   ctx.save();
   ctx.beginPath();
   ctx.rect(rx, ry, rw, rh);
   ctx.clip();
+  if (bw) ctx.filter = 'grayscale(1)';
   ctx.drawImage(img, rx + place.left * rw, ry + place.top * rh, place.width * rw, place.height * rh);
+  ctx.restore();
+}
+
+const FONT_FAMILY: Record<SpreadText['font'], string> = {
+  serif: '"Cormorant Garamond", Georgia, serif',
+  sans: '"Plus Jakarta Sans", Arial, sans-serif',
+  script: '"Great Vibes", cursive',
+};
+
+/** Dibuja un texto de la página con la misma cuenta que el editor (tamaño = fracción del alto de la página). */
+function drawText(ctx: CanvasRenderingContext2D, t: SpreadText, x: number, y: number, w: number, fontPx: number) {
+  const text = t.text.trim();
+  if (!text) return;
+  ctx.save();
+  ctx.font = `${t.italic ? 'italic ' : ''}${fontPx}px ${FONT_FAMILY[t.font] || FONT_FAMILY.sans}`;
+  ctx.fillStyle = t.color || '#000';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = t.align;
+  const ax = t.align === 'center' ? x + w / 2 : t.align === 'right' ? x + w : x;
+  // Corte de líneas por palabras, igual que el navegador con el mismo ancho
+  const lines: string[] = [];
+  for (const para of text.split('\n')) {
+    let line = '';
+    for (const word of para.split(/\s+/)) {
+      const probe = line ? `${line} ${word}` : word;
+      if (ctx.measureText(probe).width > w && line) {
+        lines.push(line);
+        line = word;
+      } else line = probe;
+    }
+    lines.push(line);
+  }
+  lines.forEach((l, i) => ctx.fillText(l, ax, y + i * fontPx * 1.25));
   ctx.restore();
 }
 
@@ -103,9 +138,10 @@ export async function generateAlbumPrintZip(
   if (!ctx) return { ok: false, missingPhotos: missing, error: 'El navegador no permite generar imágenes tan grandes.' };
 
   for (let i = 0; i < layout.spreads.length; i++) {
-    ctx.fillStyle = '#FFFFFF';
+    const spread = layout.spreads[i];
+    ctx.fillStyle = spread.background || '#FFFFFF';
     ctx.fillRect(0, 0, canvasW, canvasH);
-    for (const c of layout.spreads[i].cells) {
+    for (const c of spread.cells) {
       const img = images.get(c.photoId);
       if (!img) continue;
       // Rectángulo en mm sobre el pliego (sin sangrado)…
@@ -118,7 +154,15 @@ export async function generateAlbumPrintZip(
       if (c.y <= EDGE) y0 -= bleed;
       if (c.x + c.w >= 1 - EDGE) x1 += bleed;
       if (c.y + c.h >= 1 - EDGE) y1 += bleed;
-      drawPhoto(ctx, img, mmToPx(x0 + bleed), mmToPx(y0 + bleed), mmToPx(x1 - x0), mmToPx(y1 - y0), c.zoom, c.panX, c.panY);
+      drawPhoto(ctx, img, mmToPx(x0 + bleed), mmToPx(y0 + bleed), mmToPx(x1 - x0), mmToPx(y1 - y0), c.zoom, c.panX, c.panY, !!c.bw);
+    }
+    if (spread.texts?.length) {
+      try {
+        await Promise.all(spread.texts.map((t) => document.fonts.load(`${t.italic ? 'italic ' : ''}${mmToPx(t.size * ph)}px ${FONT_FAMILY[t.font]}`)));
+      } catch {
+        /* si no cargan, se usa la fuente de respaldo */
+      }
+      for (const t of spread.texts) drawText(ctx, t, mmToPx(bleed + t.x * spreadWmm), mmToPx(bleed + t.y * ph), mmToPx(t.w * spreadWmm), mmToPx(t.size * ph));
     }
     folder.file(`pliego_${String(i + 1).padStart(2, '0')}.jpg`, await canvasToBlob(canvas));
     onProgress?.(++done, total);
