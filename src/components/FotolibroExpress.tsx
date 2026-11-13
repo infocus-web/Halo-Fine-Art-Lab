@@ -1231,7 +1231,9 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="overflow-y-auto px-6 pb-6 grid grid-cols-4 sm:grid-cols-5 gap-1.5">
+              {/* El scroll va en un contenedor aparte: si la grilla misma es la que se achica, con muchas fotos las filas se aplastan. */}
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
+              <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
                 {[...photos]
                   .sort((a, b) => Number(usedIds.has(a.id)) - Number(usedIds.has(b.id)))
                   .map((p) => {
@@ -1256,7 +1258,7 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
                         className="relative aspect-square overflow-hidden rounded-md disabled:opacity-40"
                         style={{ outline: chosen || isTarget ? `3px solid ${BLUE}` : 'none', outlineOffset: -3 }}
                       >
-                        <img src={thumbSrc(p)} alt="" className="w-full h-full object-cover" draggable={false} style={{ opacity: used && !isTarget ? 0.45 : 1 }} />
+                        <img src={thumbSrc(p)} alt="" loading="lazy" className="w-full h-full object-cover" draggable={false} style={{ opacity: used && !isTarget ? 0.45 : 1 }} />
                         {used && where !== undefined && !isTarget && (
                           <span className="absolute bottom-1 left-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: 'rgba(0,0,0,.6)', color: '#fff' }}>
                             pág. {where * 2 + 1}-{where * 2 + 2}
@@ -1271,6 +1273,7 @@ export const FotolibroExpress: React.FC<Props> = ({ onClose, onAddToCart, initia
                       </button>
                     );
                   })}
+              </div>
               </div>
               {picker.kind === 'add' && (
                 <div className="shrink-0 px-6 py-4 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
